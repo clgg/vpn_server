@@ -45,6 +45,8 @@ func main() {
 
 	a := &app{db: db, version: version}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /", a.home)
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
 	mux.HandleFunc("GET /health", a.health)
 	mux.HandleFunc("GET /api/version", a.versionInfo)
 	mux.HandleFunc("GET /api/items", a.listItems)
@@ -82,6 +84,14 @@ CREATE TABLE IF NOT EXISTS items (
 );
 `)
 	return err
+}
+
+func (a *app) home(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, "web/index.html")
 }
 
 func (a *app) health(w http.ResponseWriter, r *http.Request) {

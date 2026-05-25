@@ -12,6 +12,7 @@ Go + SQLite backend deployed on AWS Lightsail.
 
 ## Endpoints
 
+- `GET /` game official site
 - `GET /health`
 - `GET /api/version`
 - `GET /api/items`
@@ -24,6 +25,12 @@ Go + SQLite backend deployed on AWS Lightsail.
 ```bash
 go mod tidy
 ADDR=127.0.0.1:8080 DB_PATH=./app.db go run .
+```
+
+Open:
+
+```text
+http://127.0.0.1:8080/
 ```
 
 ## Deploy

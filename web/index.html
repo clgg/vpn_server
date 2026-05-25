@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="草场幸存者是一款 Flutter + Flame 割草生存游戏，围绕自动战斗、三选一技能、武器合成和 Boss 关卡展开。">
+    <title>草场幸存者 | Flutter Flame 割草生存游戏</title>
+    <link rel="preload" href="/static/img/stages/farm.webp" as="image">
+    <link rel="stylesheet" href="/static/site.css">
+  </head>
+  <body>
+    <header class="topbar" aria-label="主导航">
+      <a class="brand" href="#top" aria-label="草场幸存者首页">
+        <span class="brand-mark"></span>
+        <span>草场幸存者</span>
+      </a>
+      <nav>
+        <a href="#loop">玩法</a>
+        <a href="#arsenal">武器</a>
+        <a href="#stages">关卡</a>
+        <a class="nav-cta" href="/health">服务状态</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-label="草场幸存者">
+        <div class="hero-bg" aria-hidden="true"></div>
+        <div class="hero-shade" aria-hidden="true"></div>
+        <div class="hero-copy reveal">
+          <p class="eyebrow">Flutter + Flame / Survivor Action</p>
+          <h1>草场幸存者</h1>
+          <p class="hero-line">自动攻击、走位拉扯、三选一升级，在农场怪潮里打到 Boss 出场。</p>
+          <div class="hero-actions">
+            <a class="primary-action" href="#loop">查看玩法</a>
+            <a class="secondary-action" href="/api/version">API 版本</a>
+          </div>
+        </div>
+        <div class="hero-party" aria-hidden="true">
+          <img class="hero-character hero-character-main" src="/static/img/players/beliya_walk.gif" alt="">
+          <img class="hero-character hero-character-alt" src="/static/img/players/robot_walk.gif" alt="">
+          <img class="hero-weapon" src="/static/img/weapons/star_core_cannon.webp" alt="">
+          <span class="pulse pulse-a"></span>
+          <span class="pulse pulse-b"></span>
+        </div>
+      </section>
+
+      <section id="loop" class="section gameplay reveal">
+        <div class="section-kicker">Core Loop</div>
+        <div class="section-head">
+          <h2>一局两三分钟，靠构筑把怪潮清开。</h2>
+          <p>移动躲压迫，拾取经验升级，技能树进化后切换战斗节奏，最后击败 Boss 完成关卡。</p>
+        </div>
+        <div class="flow" aria-label="玩法循环">
+          <div>
+            <strong>01</strong>
+            <span>拖动移动</span>
+            <p>自动攻击最近目标，玩家专注走位和拾取。</p>
+          </div>
+          <div>
+            <strong>02</strong>
+            <span>经验升级</span>
+            <p>每次升级三选一，逐步形成局内构筑。</p>
+          </div>
+          <div>
+            <strong>03</strong>
+            <span>武器养成</span>
+            <p>金币购买、升级、合成，解锁不同攻击形态。</p>
+          </div>
+          <div>
+            <strong>04</strong>
+            <span>Boss 结算</span>
+            <p>前 5 关按 145-260 秒逐步增加压力。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="arsenal" class="section arsenal reveal">
+        <div class="section-kicker">Arsenal</div>
+        <div class="arsenal-layout">
+          <div class="section-head">
+            <h2>18 把武器，不只是数值变大。</h2>
+            <p>近战扫击、弹跳投射、冰霜控制、爆破范围和终局合成，让每种角色都有不同解法。</p>
+          </div>
+          <div class="weapon-lineup" aria-label="武器展示">
+            <figure>
+              <img src="/static/img/weapons/wooden_stick.webp" alt="训练木棍">
+              <figcaption>训练木棍</figcaption>
+            </figure>
+            <figure>
+              <img src="/static/img/weapons/bounce_ball.webp" alt="弹力球">
+              <figcaption>弹力球</figcaption>
+            </figure>
+            <figure>
+              <img src="/static/img/weapons/frost_staff.webp" alt="冰霜法杖">
+              <figcaption>冰霜法杖</figcaption>
+            </figure>
+            <figure>
+              <img src="/static/img/weapons/mini_grenade.webp" alt="小型榴弹炮">
+              <figcaption>小型榴弹炮</figcaption>
+            </figure>
+            <figure>
+              <img src="/static/img/weapons/star_core_cannon.webp" alt="星核榴光炮">
+              <figcaption>星核榴光炮</figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section class="section builds reveal" aria-label="技能构筑">
+        <div class="builds-bg" aria-hidden="true"></div>
+        <div class="section-head">
+          <div class="section-kicker">Skill Builds</div>
+          <h2>技能不是加点表，是本局打法。</h2>
+          <p>星矢、环刃、雷暴、虚空、冰霜和火焰路线可以进化，也能组合成终极技能。</p>
+        </div>
+        <div class="skill-row">
+          <img src="/static/img/skills/star_projectile.webp" alt="星矢小弹">
+          <img src="/static/img/skills/orbit_blade.webp" alt="环刃领域">
+          <img src="/static/img/skills/thunder_matrix.webp" alt="雷暴矩阵">
+          <img src="/static/img/skills/void_magnet.webp" alt="虚空磁吸">
+        </div>
+      </section>
+
+      <section id="stages" class="section stages reveal">
+        <div class="stage-copy">
+          <div class="section-kicker">Stages</div>
+          <h2>第一章从农场开始，压力逐关抬升。</h2>
+          <p>小鸡、小羊、小猪、小牛和火鸡组成前期怪潮，第 5 关固定 Boss 形成第一次挑战。</p>
+        </div>
+        <div class="stage-window" aria-label="关卡场景预览">
+          <img src="/static/img/stages/city.webp" alt="城市关卡预览">
+        </div>
+      </section>
+
+      <section class="final-cta reveal">
+        <h2>下一步可以把 Flutter Web 试玩包接到这里。</h2>
+        <p>当前官网已经上线在 Go 服务里，后续可以继续加下载入口、更新日志、排行榜和账号接口。</p>
+        <a class="primary-action" href="/api/items">查看示例 API</a>
+      </section>
+    </main>
+
+    <script src="/static/site.js"></script>
+  </body>
+</html>

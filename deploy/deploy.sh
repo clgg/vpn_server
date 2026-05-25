@@ -11,7 +11,11 @@ SSH_KEY="${SSH_KEY:-${HOME}/.ssh/LightsailDefaultKey-ap-northeast-1.pem}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCHIVE="/tmp/${APP_NAME}.tar.gz"
 
-COPYFILE_DISABLE=1 tar \
+if command -v xattr >/dev/null 2>&1; then
+  xattr -cr "${ROOT_DIR}" 2>/dev/null || true
+fi
+
+COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata --disable-copyfile \
   --exclude ".git" \
   --exclude "${APP_NAME}" \
   --exclude "*.db" \
