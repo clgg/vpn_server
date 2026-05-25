@@ -1,0 +1,16 @@
+.DS_Store
+
+# Build outputs
+/go-sqlite-api
+/bin/
+/dist/
+
+# Runtime data
+*.db
+*.db-shm
+*.db-wal
+
+# Local config and secrets
+.env
+*.pem
+
