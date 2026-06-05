@@ -18,6 +18,7 @@ import (
 type app struct {
 	db      *sql.DB
 	version string
+	vpn     vpnManager
 }
 
 type item struct {
@@ -43,16 +44,33 @@ func main() {
 		log.Fatal(err)
 	}
 
-	a := &app{db: db, version: version}
+	a := &app{
+		db:      db,
+		version: version,
+		vpn:     newVPNManager(db),
+	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", a.home)
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+	mux.HandleFunc("GET /", a.index)
+	mux.HandleFunc("GET /vpn-admin", a.vpnAdminPage)
 	mux.HandleFunc("GET /health", a.health)
 	mux.HandleFunc("GET /api/version", a.versionInfo)
+	mux.HandleFunc("GET /api/auth/me", a.authMe)
+	mux.HandleFunc("POST /api/auth/login", a.authLogin)
+	mux.HandleFunc("POST /api/auth/logout", a.authLogout)
 	mux.HandleFunc("GET /api/items", a.listItems)
 	mux.HandleFunc("POST /api/items", a.createItem)
 	mux.HandleFunc("PATCH /api/items/", a.updateItem)
 	mux.HandleFunc("DELETE /api/items/", a.deleteItem)
+	mux.HandleFunc("GET /api/vpn/status", a.requireLogin(a.vpnStatus))
+	mux.HandleFunc("GET /api/vpn/users", a.requireLogin(a.vpnUsers))
+	mux.HandleFunc("POST /api/vpn/users", a.requireAdmin(a.vpnCreateUser))
+	mux.HandleFunc("PATCH /api/vpn/users/", a.requireAdmin(a.vpnUpdateUser))
+	mux.HandleFunc("DELETE /api/vpn/users/", a.requireAdmin(a.vpnDeleteUser))
+	mux.HandleFunc("POST /api/vpn/apply", a.requireAdmin(a.vpnApply))
+	mux.HandleFunc("GET /api/vpn/traffic", a.requireLogin(a.vpnTrafficHistory))
+	mux.HandleFunc("GET /api/vpn/configs/", a.requireLogin(a.vpnConfig))
+	mux.HandleFunc("GET /api/vpn/public/", a.vpnPublicConfig)
+	mux.HandleFunc("GET /api/rocket/profiles/", a.rocketProfile)
 	mux.HandleFunc("OPTIONS /", options)
 	mux.HandleFunc("OPTIONS /api/", options)
 
@@ -83,15 +101,10 @@ CREATE TABLE IF NOT EXISTS items (
 	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 `)
-	return err
-}
-
-func (a *app) home(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
+	if err != nil {
+		return err
 	}
-	http.ServeFile(w, r, "web/index.html")
+	return migrateVPN(db)
 }
 
 func (a *app) health(w http.ResponseWriter, r *http.Request) {

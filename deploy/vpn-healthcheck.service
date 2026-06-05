@@ -1,0 +1,8 @@
+[Unit]
+Description=VPN sing-box health check
+
+[Service]
+Type=oneshot
+Environment=VPN_SERVER_HOST=54.150.9.209
+Environment=VPN_SERVER_PORT=443
+ExecStart=/usr/local/sbin/vpn-healthcheck.sh

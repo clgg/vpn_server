@@ -10,13 +10,13 @@ WorkingDirectory=/opt/apps/go-sqlite-api
 Environment=ADDR=127.0.0.1:8080
 Environment=DB_PATH=/var/lib/go-sqlite-api/app.db
 Environment=VERSION=1.0.0
+EnvironmentFile=-/etc/go-sqlite-api/vpn.env
 ExecStart=/opt/apps/go-sqlite-api/go-sqlite-api
 Restart=always
 RestartSec=3
-NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=/var/lib/go-sqlite-api
+ReadWritePaths=/var/lib/go-sqlite-api /etc/sing-box
 
 [Install]
 WantedBy=multi-user.target

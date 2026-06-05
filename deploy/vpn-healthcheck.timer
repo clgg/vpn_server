@@ -1,0 +1,11 @@
+[Unit]
+Description=Run VPN sing-box health check every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=vpn-healthcheck.service
+
+[Install]
+WantedBy=timers.target

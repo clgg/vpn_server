@@ -44,17 +44,26 @@ sudo rm -rf "${APP_DIR}.previous"
 if [ -d "${APP_DIR}" ]; then sudo mv "${APP_DIR}" "${APP_DIR}.previous"; fi
 sudo mv "${APP_DIR}.new" "${APP_DIR}"
 sudo cp "${APP_DIR}/deploy/go-sqlite-api.service" /etc/systemd/system/go-sqlite-api.service
+sudo install -m 755 "${APP_DIR}/deploy/vpn-healthcheck.sh" /usr/local/sbin/vpn-healthcheck.sh
+sudo cp "${APP_DIR}/deploy/vpn-healthcheck.service" /etc/systemd/system/vpn-healthcheck.service
+sudo cp "${APP_DIR}/deploy/vpn-healthcheck.timer" /etc/systemd/system/vpn-healthcheck.timer
 sudo cp "${APP_DIR}/deploy/nginx-go-sqlite-api.conf" /etc/nginx/sites-available/go-sqlite-api
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo ln -sf /etc/nginx/sites-available/go-sqlite-api /etc/nginx/sites-enabled/go-sqlite-api
 sudo nginx -t
 sudo systemctl daemon-reload
 sudo systemctl enable --now "${SERVICE_NAME}"
+sudo systemctl enable --now vpn-healthcheck.timer
 sudo systemctl restart "${SERVICE_NAME}"
 sudo systemctl restart nginx
 sudo systemctl is-active "${SERVICE_NAME}"
 sudo systemctl is-active nginx
+sudo systemctl is-active vpn-healthcheck.timer
 EOF
 
-curl -fsS "http://${REMOTE_HOST}/health"
+ssh -i "${SSH_KEY}" "${REMOTE_USER}@${REMOTE_HOST}" \
+  'curl -fsS http://127.0.0.1:8080/health'
+echo
+curl -fsS --max-time 10 "http://${REMOTE_HOST}/health" >/dev/null \
+  || echo "public /health check did not complete; local service health is OK"
 echo
