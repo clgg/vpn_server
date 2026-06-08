@@ -44,6 +44,12 @@ sudo rm -rf "${APP_DIR}.previous"
 if [ -d "${APP_DIR}" ]; then sudo mv "${APP_DIR}" "${APP_DIR}.previous"; fi
 sudo mv "${APP_DIR}.new" "${APP_DIR}"
 sudo cp "${APP_DIR}/deploy/go-sqlite-api.service" /etc/systemd/system/go-sqlite-api.service
+if [ ! -f /etc/go-sqlite-api/vpn.env ]; then
+  sudo install -d -m 755 /etc/go-sqlite-api
+  sudo cp "${APP_DIR}/deploy/vpn.env.example" /etc/go-sqlite-api/vpn.env
+  sudo chmod 600 /etc/go-sqlite-api/vpn.env
+  echo "WARNING: created /etc/go-sqlite-api/vpn.env from template; edit it before exporting client configs"
+fi
 sudo install -m 755 "${APP_DIR}/deploy/vpn-healthcheck.sh" /usr/local/sbin/vpn-healthcheck.sh
 sudo cp "${APP_DIR}/deploy/vpn-healthcheck.service" /etc/systemd/system/vpn-healthcheck.service
 sudo cp "${APP_DIR}/deploy/vpn-healthcheck.timer" /etc/systemd/system/vpn-healthcheck.timer

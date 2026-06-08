@@ -207,6 +207,17 @@ const vpnAdminHTML = `<!doctype html>
     .toast.ok { color: var(--green); }
     .toast.bad { color: var(--red); }
     .note { color: var(--muted); font-size: 12px; margin: 10px 0 0; line-height: 1.5; }
+    .deviceList { display: grid; gap: 10px; margin-top: 8px; }
+    .deviceItem {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--panel2);
+      display: grid;
+      gap: 8px;
+    }
+    .deviceItem.online { border-color: #9ec5ff; background: #f8fbff; }
+    .deviceMeta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .configLayout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
     .methodList { margin: 0; padding-left: 20px; color: var(--text); line-height: 1.75; }
     .qrBox {
@@ -217,7 +228,9 @@ const vpnAdminHTML = `<!doctype html>
       background: var(--panel2);
       padding: 14px;
     }
-    .qrBox img { width: 220px; height: 220px; image-rendering: pixelated; }
+    .qrBox img { width: 220px; height: 220px; image-rendering: pixelated; background: #fff; }
+    .qrBox img.loading { opacity: 0.35; }
+    .qrBox .qrStatus { color: var(--muted); font-size: 12px; margin: 0; }
     .modal {
       position: fixed;
       inset: 0;
@@ -333,12 +346,14 @@ const vpnAdminHTML = `<!doctype html>
                 <th>账号 / 角色</th>
                 <th>UUID</th>
                 <th>状态</th>
+                <th>在线设备</th>
                 <th>配置入口</th>
                 <th id="opsHead">操作</th>
               </tr>
             </thead>
             <tbody id="users"></tbody>
           </table>
+          <p id="devicesNote" class="note"></p>
           <p id="statsNote" class="note"></p>
         </section>
       </section>
@@ -374,6 +389,17 @@ const vpnAdminHTML = `<!doctype html>
     </main>
   </div>
 
+  <div id="deviceModal" class="modal hidden">
+    <div class="dialog" style="width:min(560px,100%);">
+      <h2 id="deviceModalTitle">在线设备</h2>
+      <p id="deviceModalSub" class="note"></p>
+      <div id="deviceModalList" class="deviceList"></div>
+      <div class="dialogActions">
+        <button id="deviceModalClose">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <div id="editModal" class="modal hidden">
     <div class="dialog">
       <h2>编辑人员</h2>
@@ -393,6 +419,7 @@ const vpnAdminHTML = `<!doctype html>
     let currentUser = null;
     let usersById = new Map();
     let editingId = null;
+    let managingDevicesUserId = null;
     let currentBucket = "hour";
     let lastStatus = null;
 
@@ -415,6 +442,21 @@ const vpnAdminHTML = `<!doctype html>
         return res.json();
       });
     }
+    async function apiRetry(path, options = {}, attempts = 3) {
+      let lastErr = null;
+      for (let i = 1; i <= attempts; i++) {
+        try {
+          return await api(path, options);
+        } catch (err) {
+          lastErr = err;
+          if (String(err.message).includes("401")) throw err;
+          if (i < attempts) {
+            await new Promise((resolve) => setTimeout(resolve, 300 * i));
+          }
+        }
+      }
+      throw lastErr;
+    }
     function fmtBytes(n) {
       if (!n) return "0 B";
       const units = ["B", "KB", "MB", "GB", "TB"];
@@ -426,6 +468,36 @@ const vpnAdminHTML = `<!doctype html>
       return String(value || "").replace(/[&<>"']/g, (ch) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
       }[ch]));
+    }
+    function mountConfigQR(imgId, qrURL) {
+      const img = $(imgId);
+      if (!img) return;
+      const status = img.parentElement && img.parentElement.querySelector(".qrStatus");
+      if (status) status.textContent = "二维码加载中...";
+      img.removeAttribute("src");
+      img.classList.add("loading");
+      const tryLoad = (attempt) => fetch(qrURL, { credentials: "same-origin", cache: "no-store" })
+        .then((res) => {
+          if (!res.ok) throw new Error(String(res.status));
+          return res.blob();
+        })
+        .then((blob) => {
+          if (!blob.type.startsWith("image/")) throw new Error("invalid-image");
+          if (img.dataset.objectUrl) URL.revokeObjectURL(img.dataset.objectUrl);
+          const objectUrl = URL.createObjectURL(blob);
+          img.dataset.objectUrl = objectUrl;
+          img.src = objectUrl;
+          img.classList.remove("loading");
+          if (status) status.textContent = "";
+        })
+        .catch(() => {
+          if (attempt < 4) {
+            return new Promise((resolve) => setTimeout(resolve, 250 * attempt)).then(() => tryLoad(attempt + 1));
+          }
+          img.classList.remove("loading");
+          if (status) status.textContent = "二维码加载失败，请返回后重试，或使用下方导入链接。";
+        });
+      return tryLoad(1);
     }
     function showView(name) {
       $("dashboardView").classList.toggle("hidden", name !== "dashboard");
@@ -455,9 +527,9 @@ const vpnAdminHTML = `<!doctype html>
     async function load() {
       try {
         const results = await Promise.all([
-          api("/api/vpn/status"),
-          api("/api/vpn/users"),
-          api("/api/vpn/traffic?bucket=" + encodeURIComponent(currentBucket))
+          apiRetry("/api/vpn/status"),
+          apiRetry("/api/vpn/users"),
+          apiRetry("/api/vpn/traffic?bucket=" + encodeURIComponent(currentBucket))
         ]);
         lastStatus = results[0];
         renderStatus(results[0]);
@@ -466,7 +538,12 @@ const vpnAdminHTML = `<!doctype html>
         setMsg("message", "已刷新", false);
       } catch (err) {
         if (String(err.message).includes("401")) showLogin();
-        setMsg("message", err.message, true);
+        const msg = String(err.message || err);
+        if (msg === "Failed to fetch" || msg.includes("NetworkError")) {
+          setMsg("message", "加载失败：请关闭 Clash 全局/TUN，或重新导入最新 Clash 配置后再刷新", true);
+        } else {
+          setMsg("message", msg, true);
+        }
       }
     }
     function renderStatus(status) {
@@ -551,9 +628,54 @@ const vpnAdminHTML = `<!doctype html>
       if (bucket === "day") return String(d.getMonth() + 1) + "/" + d.getDate();
       return String(d.getMonth() + 1) + "/" + d.getDate() + " " + String(d.getHours()).padStart(2, "0") + ":00";
     }
+    function deviceTypeOptions(selected) {
+      const options = [
+        ["unknown", "未知设备"],
+        ["phone", "手机"],
+        ["mac", "Mac"],
+        ["pc", "台式机/Windows"],
+        ["tablet", "平板"],
+        ["tv", "电视/盒子"],
+        ["other", "其他"]
+      ];
+      return options.map(([value, label]) => '<option value="' + value + '"' + (selected === value ? " selected" : "") + '>' + label + '</option>').join("");
+    }
+    function renderOnlineDevicesCell(user) {
+      const count = user.online_device_count || 0;
+      const devices = user.online_devices || [];
+      if (count === 0) {
+        return '<span class="muted">0 台</span><br><button data-devices="' + user.id + '">管理设备</button>';
+      }
+      const labels = devices.slice(0, 2).map((d) => escapeHTML(d.display_label)).join(" · ");
+      const more = count > 2 ? " 等" : "";
+      return '<span class="statusOk">' + count + ' 台在线</span><br><span class="muted">' + labels + more + '</span><br><button data-devices="' + user.id + '">管理设备</button>';
+    }
+    function renderDeviceModal(user) {
+      managingDevicesUserId = String(user.id);
+      $("deviceModalTitle").textContent = user.name + " 的设备";
+      $("deviceModalSub").textContent = "VPN 协议无法自动识别 Mac/手机型号；首次上线会显示为「未知设备」，你可以手动改名和选择类型。";
+      const known = user.known_devices || [];
+      if (known.length === 0) {
+        $("deviceModalList").innerHTML = '<p class="note">暂无记录。账号连接 VPN 后会在这里出现。</p>';
+        return;
+      }
+      $("deviceModalList").innerHTML = known.map((device) => {
+        const status = device.online
+          ? '<span class="pill statusOk">在线 · ' + device.active_connections + " 连接</span>"
+          : '<span class="pill">离线</span>';
+        return '<div class="deviceItem' + (device.online ? " online" : "") + '">'
+          + '<div class="deviceMeta"><b>' + escapeHTML(device.display_label) + '</b>' + status + '</div>'
+          + '<div class="muted">IP ' + escapeHTML(device.source_ip) + ' · 最近活跃 ' + new Date(device.last_seen_at).toLocaleString() + '</div>'
+          + '<label>设备名称<input data-device-name="' + escapeHTML(device.source_ip) + '" value="' + escapeHTML(device.display_name || "") + '" placeholder="例如：iPhone 15、办公室 Mac"></label>'
+          + '<label>设备类型<select data-device-type="' + escapeHTML(device.source_ip) + '">' + deviceTypeOptions(device.device_type || "unknown") + '</select></label>'
+          + '<div class="actions"><button class="primary" data-save-device="' + user.id + '" data-device-ip="' + escapeHTML(device.source_ip) + '">保存标注</button></div>'
+          + '</div>';
+      }).join("");
+    }
     function renderUsers(list) {
       const isAdmin = currentUser && currentUser.role === "admin";
       usersById = new Map(list.users.map((u) => [String(u.id), u]));
+      $("devicesNote").textContent = list.devices_note || "";
       $("users").innerHTML = list.users.map((u) => {
         const ops = isAdmin
           ? '<td class="actions"><button data-edit="' + u.id + '">编辑</button><button data-toggle="' + u.id + '" data-enabled="' + u.enabled + '">' + (u.enabled ? "停用" : "启用") + '</button><button class="danger" data-delete="' + u.id + '">删除</button></td>'
@@ -563,6 +685,7 @@ const vpnAdminHTML = `<!doctype html>
           + '<td>' + escapeHTML(u.login_email || "-") + '<br><span class="pill">' + (u.role === "admin" ? "管理员" : "普通用户") + '</span></td>'
           + '<td><code>' + escapeHTML(u.uuid) + '</code></td>'
           + '<td>' + (u.enabled ? '<span class="statusOk">启用</span>' : '<span class="statusBad">停用</span>') + '</td>'
+          + '<td>' + renderOnlineDevicesCell(u) + '</td>'
           + '<td class="actions">'
           + '<button data-config="vless" data-user="' + u.id + '">扫码/通用链接</button>'
           + '<button data-config="rocket" data-user="' + u.id + '">clg 小火箭</button>'
@@ -591,7 +714,7 @@ const vpnAdminHTML = `<!doctype html>
           + '<h3>无法扫码时</h3>'
           + '<ol class="methodList"><li>点击“复制导入链接”。</li><li>在 App 的配置入口粘贴链接后点击“导入”。</li><li>如果网络环境拦截远程拉取，可以下载配置包 JSON 后粘贴到 App。</li></ol>'
           + '<h3>导入链接</h3><textarea id="rocketImportText" readonly>正在读取导入链接...</textarea>';
-	        side = '<div class="qrBox"><img alt="clg 小火箭导入二维码" src="' + base + 'rocket-import-qr?v=' + cacheKey + '"><p class="note">二维码内容是 clg 的小火箭专用导入链接，包含短 token；用户停用后配置接口会拒绝访问。</p></div>';
+	        side = '<div class="qrBox"><img id="configQr" class="loading" alt="clg 小火箭导入二维码"><p class="qrStatus">二维码加载中...</p><p class="note">二维码内容是 clg 的小火箭专用导入链接，包含短 token；用户停用后配置接口会拒绝访问。</p></div>';
       } else if (kind === "clash") {
         actions = '<a id="openClashImport" class="button primary" href="#">一键导入 Clash Meta</a><button id="copyClashImport">复制导入链接</button><a class="button" href="' + base + 'clash">下载 Clash YAML</a>';
         methods = '<h3>安卓手机安装</h3>'
@@ -601,7 +724,7 @@ const vpnAdminHTML = `<!doctype html>
           + '<ol class="methodList"><li>电脑端使用 Clash Verge Rev，先从发布页安装对应系统版本。</li><li>点击“下载 Clash YAML”。</li><li>打开 Clash Verge，进入“订阅/配置”。</li><li>选择从本地文件导入，选中刚下载的 YAML。</li><li>切换到该配置，并在代理组中选择本节点。</li></ol>'
           + '<div class="actions" style="margin:12px 0 18px;"><a class="button" target="_blank" href="https://github.com/clash-verge-rev/clash-verge-rev/releases">下载 Clash Verge Rev</a></div>'
           + '<h3>导入链接</h3><textarea id="clashImportText" readonly>正在读取导入链接...</textarea>';
-	        side = '<div class="qrBox"><img alt="Clash Meta 导入二维码" src="' + base + 'clash-import-qr?v=' + cacheKey + '"><p class="note">二维码内容是 Clash Meta 配置导入链接，不是 VLESS 分享链接。</p></div>';
+	        side = '<div class="qrBox"><img id="configQr" class="loading" alt="Clash Meta 导入二维码"><p class="qrStatus">二维码加载中...</p><p class="note">二维码内容是 Clash Meta 配置导入链接，不是 VLESS 分享链接。</p></div>';
       } else if (kind === "sing-box") {
         actions = '<a id="openSingBoxImport" class="button primary" href="#">一键导入 sing-box</a><button id="copySingBoxImport">复制导入链接</button><a class="button" href="' + base + 'sing-box">下载 JSON 配置</a>';
         methods = '<h3>推荐导入方式</h3>'
@@ -615,17 +738,26 @@ const vpnAdminHTML = `<!doctype html>
           + '<h3>桌面 / 手动导入</h3>'
           + '<ol class="methodList"><li>如果客户端不支持远程导入，点击“下载 JSON 配置”。</li><li>在 sing-box 客户端中新建本地配置，导入下载的 JSON 文件。</li><li>保存后启用配置；如果无法连接，先确认系统 VPN 权限已允许。</li></ol>'
           + '<h3>导入链接</h3><textarea id="singBoxImportText" readonly>正在读取导入链接...</textarea>';
-	        side = '<div class="qrBox"><img alt="sing-box 导入二维码" src="' + base + 'sing-box-import-qr?v=' + cacheKey + '"><p class="note">二维码内容是 sing-box 远程配置导入链接，不是 VLESS 分享链接。</p></div>';
+	        side = '<div class="qrBox"><img id="configQr" class="loading" alt="sing-box 导入二维码"><p class="qrStatus">二维码加载中...</p><p class="note">二维码内容是 sing-box 远程配置导入链接，不是 VLESS 分享链接。</p></div>';
       } else {
         actions = '<button id="copyVless" class="primary">复制 VLESS 链接</button><a class="button" href="' + base + 'vless">下载链接文本</a>';
         methods = '<h3>适用客户端</h3>'
           + '<ol class="methodList"><li>这个页面适用于支持 VLESS Reality 分享链接的软件，例如 Hiddify、NekoBox、v2rayN、Shadowrocket 等。</li><li>手机端优先使用客户端内的扫码导入，直接扫描右侧二维码。</li><li>如果客户端没有“粘贴/从剪贴板导入”，不要复制链接，直接扫码或下载链接文本保存。</li><li>官方 sing-box 通常使用 JSON 配置，请返回列表进入 sing-box 配置页。</li></ol>'
           + '<div class="actions" style="margin:12px 0 18px;"><a class="button" target="_blank" href="https://github.com/hiddify/hiddify-app/releases">Hiddify Android 发布页</a><a class="button" target="_blank" href="https://github.com/MatsuriDayo/NekoBoxForAndroid/releases">NekoBox Android 发布页</a></div>'
           + '<h3>VLESS 链接内容</h3><textarea id="vlessText" readonly>正在读取链接...</textarea>';
-	        side = '<div class="qrBox"><img alt="VLESS 分享二维码" src="' + base + 'qr?v=' + cacheKey + '"><p class="note">二维码内容是通用 VLESS 分享链接。sing-box JSON 导入失败时，可以用 Hiddify 或 NekoBox 扫这个二维码验证账号是否可用。</p></div>';
+	        side = '<div class="qrBox"><img id="configQr" class="loading" alt="VLESS 分享二维码"><p class="qrStatus">二维码加载中...</p><p class="note">二维码内容是通用 VLESS 分享链接。sing-box JSON 导入失败时，可以用 Hiddify 或 NekoBox 扫这个二维码验证账号是否可用。</p></div>';
       }
       $("configBody").innerHTML = '<div class="configLayout"><div><div class="actions" style="margin-bottom:14px;">' + actions + '</div>' + methods + '</div>' + side + '</div>';
       showView("config");
+      const qrKinds = {
+        rocket: "rocket-import-qr",
+        clash: "clash-import-qr",
+        "sing-box": "sing-box-import-qr",
+        vless: "qr"
+      };
+      if (qrKinds[kind]) {
+        mountConfigQR("configQr", base + qrKinds[kind] + "?v=" + cacheKey);
+      }
       if (kind === "vless") {
         fetch(base + "vless", { credentials: "same-origin" }).then((res) => res.text()).then((text) => {
           $("vlessText").value = text;
@@ -755,6 +887,10 @@ const vpnAdminHTML = `<!doctype html>
       editingId = null;
       $("editModal").classList.add("hidden");
     };
+    $("deviceModalClose").onclick = () => {
+      managingDevicesUserId = null;
+      $("deviceModal").classList.add("hidden");
+    };
     $("editSave").onclick = async () => {
       if (!editingId) return;
       const body = {
@@ -778,6 +914,36 @@ const vpnAdminHTML = `<!doctype html>
       const configUser = event.target.dataset.user;
       if (configKind && configUser) {
         openConfig(configUser, configKind);
+        return;
+      }
+      const devicesUser = event.target.dataset.devices;
+      if (devicesUser) {
+        const user = usersById.get(String(devicesUser));
+        if (!user) return;
+        renderDeviceModal(user);
+        $("deviceModal").classList.remove("hidden");
+        return;
+      }
+      const saveDeviceUser = event.target.dataset.saveDevice;
+      const saveDeviceIP = event.target.dataset.deviceIp;
+      if (saveDeviceUser && saveDeviceIP) {
+        const displayName = document.querySelector('[data-device-name="' + saveDeviceIP + '"]');
+        const deviceType = document.querySelector('[data-device-type="' + saveDeviceIP + '"]');
+        try {
+          await api("/api/vpn/devices/" + saveDeviceUser + "/" + encodeURIComponent(saveDeviceIP), {
+            method: "PATCH",
+            body: JSON.stringify({
+              display_name: displayName ? displayName.value : "",
+              device_type: deviceType ? deviceType.value : "unknown"
+            })
+          });
+          setMsg("message", "设备标注已保存", false);
+          await load();
+          const user = usersById.get(String(saveDeviceUser));
+          if (user) renderDeviceModal(user);
+        } catch (err) {
+          setMsg("message", err.message, true);
+        }
         return;
       }
       const edit = event.target.dataset.edit;

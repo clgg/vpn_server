@@ -121,6 +121,9 @@ VALUES (?, ?, 1, ?);
 			return err
 		}
 	}
+	if err := migrateVPNDevices(db); err != nil {
+		return err
+	}
 	return seedAdminAccount(db)
 }
 
@@ -334,7 +337,16 @@ func (a *app) vpnUsers(w http.ResponseWriter, r *http.Request, current sessionUs
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"users": users, "current_user": current})
+	enriched, devicesNote, err := a.vpn.usersWithDevices(r.Context(), users)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"users":         enriched,
+		"current_user":  current,
+		"devices_note":  devicesNote,
+	})
 }
 
 func (a *app) vpnCreateUser(w http.ResponseWriter, r *http.Request, current sessionUser) {
@@ -455,8 +467,12 @@ func (a *app) vpnConfig(w http.ResponseWriter, r *http.Request, current sessionU
 		writeError(w, http.StatusForbidden, errors.New("cannot access another user's config"))
 		return
 	}
-		rt := currentVPNRuntime()
-		w.Header().Set("Cache-Control", "no-store")
+	rt := currentVPNRuntime()
+	if err := validateVPNRuntime(rt); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 		switch kind {
 	case "vless":
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -565,9 +581,13 @@ func (a *app) vpnPublicConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errors.New("user is disabled"))
 		return
 	}
-		rt := currentVPNRuntime()
-		w.Header().Set("Cache-Control", "no-store")
-		switch kind {
+	rt := currentVPNRuntime()
+	if err := validateVPNRuntime(rt); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	switch kind {
 	case "sing-box.json":
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-sing-box.json"`, user.Name))
@@ -918,6 +938,20 @@ func currentVPNRuntime() vpnRuntime {
 	}
 }
 
+func validateVPNRuntime(rt vpnRuntime) error {
+	host := strings.TrimSpace(rt.ServerHost)
+	if host == "" || host == "127.0.0.1" || host == "localhost" {
+		return errors.New("VPN_SERVER_HOST is not configured; check /etc/go-sqlite-api/vpn.env")
+	}
+	if strings.TrimSpace(rt.PublicKey) == "" {
+		return errors.New("VPN_REALITY_PUBLIC_KEY is not configured; check /etc/go-sqlite-api/vpn.env")
+	}
+	if strings.TrimSpace(rt.ShortID) == "" {
+		return errors.New("VPN_REALITY_SHORT_ID is not configured; check /etc/go-sqlite-api/vpn.env")
+	}
+	return nil
+}
+
 func envInt(key string, fallback int) int {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -1043,6 +1077,14 @@ func singBoxServerConfig(users []vpnUser) (string, error) {
 			map[string]any{"type": "direct", "tag": "direct"},
 		},
 	}
+	if listen, secret, ok := clashAPISettings(); ok {
+		config["experimental"] = map[string]any{
+			"clash_api": map[string]any{
+				"external_controller": listen,
+				"secret":              secret,
+			},
+		}
+	}
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return "", err
@@ -1066,16 +1108,49 @@ func vlessURL(user vpnUser, rt vpnRuntime) string {
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s", user.UUID, rt.ServerHost, rt.Port, strings.Join(values, "&"), user.Name)
 }
 
+func clashBypassRules(serverHost string) string {
+	host := strings.TrimSpace(serverHost)
+	if host == "" {
+		return ""
+	}
+	return fmt.Sprintf(`  - IP-CIDR,%s/32,DIRECT,no-resolve
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
+`, host)
+}
+
 func clashConfig(user vpnUser, rt vpnRuntime) string {
 	flowLine := ""
 	if flow := vpnUserFlow(user); flow != "" {
 		flowLine = fmt.Sprintf("    flow: %s\n", flow)
 	}
+	bypassRules := clashBypassRules(rt.ServerHost)
+	dnsPolicyLine := ""
+	if host := strings.TrimSpace(rt.ServerHost); host != "" {
+		dnsPolicyLine = fmt.Sprintf("    '%s': system\n", host)
+	}
 	return fmt.Sprintf(`mixed-port: 7890
 allow-lan: false
 mode: rule
 log-level: info
+tcp-concurrent: true
+connect-timeout: 5000
+keep-alive-interval: 15
+unified-delay: false
 
+dns:
+  enable: true
+  enhanced-mode: fake-ip
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - https://dns.alidns.com/dns-query
+  nameserver-policy:
+%s
 proxies:
   - name: %s
     type: vless
@@ -1103,9 +1178,9 @@ proxy-groups:
       - DIRECT
 
 rules:
-  - GEOIP,CN,DIRECT
+%s  - GEOIP,CN,DIRECT
   - MATCH,PROXY
-`, user.Name, rt.ServerHost, rt.Port, user.UUID, flowLine, rt.SNI, rt.PublicKey, rt.ShortID, user.Name)
+`, dnsPolicyLine, user.Name, rt.ServerHost, rt.Port, user.UUID, flowLine, rt.SNI, rt.PublicKey, rt.ShortID, user.Name, bypassRules)
 }
 
 func singBoxClientConfig(user vpnUser, rt vpnRuntime) string {

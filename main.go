@@ -68,6 +68,7 @@ func main() {
 	mux.HandleFunc("DELETE /api/vpn/users/", a.requireAdmin(a.vpnDeleteUser))
 	mux.HandleFunc("POST /api/vpn/apply", a.requireAdmin(a.vpnApply))
 	mux.HandleFunc("GET /api/vpn/traffic", a.requireLogin(a.vpnTrafficHistory))
+	mux.HandleFunc("PATCH /api/vpn/devices/", a.requireLogin(a.vpnUpdateDevice))
 	mux.HandleFunc("GET /api/vpn/configs/", a.requireLogin(a.vpnConfig))
 	mux.HandleFunc("GET /api/vpn/public/", a.vpnPublicConfig)
 	mux.HandleFunc("GET /api/rocket/profiles/", a.rocketProfile)
@@ -319,5 +320,6 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 }
 
 func writeError(w http.ResponseWriter, status int, err error) {
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
