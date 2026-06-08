@@ -46,6 +46,7 @@ type clashConnectionMetadata struct {
 	InboundUser string `json:"inboundUser"`
 	InboundName string `json:"inboundName"`
 	User        string `json:"user"`
+	Type        string `json:"type"`
 }
 
 var deviceTypeLabels = map[string]string{
@@ -135,17 +136,8 @@ func fetchClashConnections(ctx context.Context) ([]clashConnection, error) {
 	return payload.Connections, nil
 }
 
-func clashConnectionUser(meta clashConnectionMetadata) string {
-	for _, value := range []string{meta.InboundUser, meta.User} {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func (m vpnManager) syncOnlineDevices(ctx context.Context, users []vpnUser) (map[int64][]vpnDeviceStatus, string, error) {
+	refreshUserIPMappings(ctx)
 	connections, err := fetchClashConnections(ctx)
 	if err != nil {
 		return nil, "", err
@@ -160,12 +152,15 @@ func (m vpnManager) syncOnlineDevices(ctx context.Context, users []vpnUser) (map
 	live := make(map[int64]map[string]*liveDevice)
 	for _, conn := range connections {
 		meta := conn.Metadata
-		if tag := strings.TrimSpace(meta.InboundName); tag != "" && tag != vpnInboundTag {
+		if !isVPNInboundConnection(meta) {
 			continue
 		}
-		userName := clashConnectionUser(meta)
 		sourceIP := strings.TrimSpace(meta.SourceIP)
-		if userName == "" || sourceIP == "" {
+		if sourceIP == "" {
+			continue
+		}
+		userName := clashConnectionUser(meta, sourceIP)
+		if userName == "" {
 			continue
 		}
 		user, ok := userByName[userName]

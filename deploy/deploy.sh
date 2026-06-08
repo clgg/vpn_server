@@ -40,6 +40,10 @@ sudo chown root:root "${APP_NAME}"
 sudo chmod 755 "${APP_NAME}"
 sudo useradd --system --home /var/lib/${APP_NAME} --shell /usr/sbin/nologin goapi 2>/dev/null || true
 sudo install -d -o goapi -g goapi -m 750 /var/lib/${APP_NAME}
+sudo install -d -m 755 -o sing-box -g sing-box /var/lib/sing-box
+sudo touch /var/lib/sing-box/access.log
+sudo chown sing-box:sing-box /var/lib/sing-box/access.log
+sudo chmod 644 /var/lib/sing-box/access.log
 sudo rm -rf "${APP_DIR}.previous"
 if [ -d "${APP_DIR}" ]; then sudo mv "${APP_DIR}" "${APP_DIR}.previous"; fi
 sudo mv "${APP_DIR}.new" "${APP_DIR}"

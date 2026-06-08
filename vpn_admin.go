@@ -1050,7 +1050,11 @@ func singBoxServerConfig(users []vpnUser) (string, error) {
 		return "", errors.New("at least one enabled user is required")
 	}
 	config := map[string]any{
-		"log": map[string]any{"level": "info", "timestamp": true},
+		"log": map[string]any{
+			"level":     "info",
+			"timestamp": true,
+			"output":    "/var/lib/sing-box/access.log",
+		},
 		"inbounds": []any{
 			map[string]any{
 				"type":        "vless",
