@@ -473,18 +473,28 @@ func (a *app) vpnConfig(w http.ResponseWriter, r *http.Request, current sessionU
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-		switch kind {
+	manifest := buildVPNConfigManifest(user, rt)
+	switch kind {
+	case "manifest":
+		writeJSON(w, http.StatusOK, manifest)
+	case "validate":
+		kindParam := strings.TrimSpace(r.URL.Query().Get("kind"))
+		if kindParam == "" {
+			kindParam = "clash"
+		}
+		writeJSON(w, http.StatusOK, buildConfigValidation(user, rt, validationKindsForQuery(kindParam)))
 	case "vless":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-vless.txt"`, user.Name))
-		fmt.Fprint(w, vlessURL(user, rt))
+		serveConfigArtifact(w, user, rt, "vless", fmt.Sprintf(`"%s-vless.txt"`, user.Name), "text/plain; charset=utf-8")
 	case "clash":
-		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-clash.yaml"`, user.Name))
-		fmt.Fprint(w, clashConfig(user, rt))
+		serveConfigArtifact(w, user, rt, "clash", fmt.Sprintf(`"%s-clash.yaml"`, user.Name), "text/yaml; charset=utf-8")
+	case "clash-android":
+		serveConfigArtifact(w, user, rt, "clash-android", fmt.Sprintf(`"%s-clash-android.yaml"`, user.Name), "text/yaml; charset=utf-8")
 	case "clash-import":
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, clashImportURL(r, user))
+	case "clash-android-import":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprint(w, clashAndroidImportURL(r, user))
 	case "clash-import-qr":
 		png, err := qrcode.Encode(clashImportURL(r, user), qrcode.Medium, 256)
 		if err != nil {
@@ -493,10 +503,16 @@ func (a *app) vpnConfig(w http.ResponseWriter, r *http.Request, current sessionU
 		}
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(png)
+	case "clash-android-import-qr":
+		png, err := qrcode.Encode(clashAndroidImportURL(r, user), qrcode.Medium, 256)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(png)
 	case "sing-box":
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-sing-box.json"`, user.Name))
-		fmt.Fprint(w, singBoxClientConfig(user, rt))
+		serveConfigArtifact(w, user, rt, "sing-box", fmt.Sprintf(`"%s-sing-box.json"`, user.Name), "application/json; charset=utf-8")
 	case "qr":
 		png, err := qrcode.Encode(vlessURL(user, rt), qrcode.Medium, 256)
 		if err != nil {
@@ -517,12 +533,7 @@ func (a *app) vpnConfig(w http.ResponseWriter, r *http.Request, current sessionU
 		w.Header().Set("Content-Type", "image/png")
 		_, _ = w.Write(png)
 	case "rocket":
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-clg-rocket.json"`, user.Name))
-		if err := writeRocketProfile(w, user, rt); err != nil {
-			writeError(w, http.StatusInternalServerError, err)
-			return
-		}
+		serveConfigArtifact(w, user, rt, "rocket", fmt.Sprintf(`"%s-clg-rocket.json"`, user.Name), "application/json; charset=utf-8")
 	case "rocket-import":
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, rocketImportURL(r, user))
@@ -589,17 +600,13 @@ func (a *app) vpnPublicConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	switch kind {
 	case "sing-box.json":
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-sing-box.json"`, user.Name))
-		fmt.Fprint(w, singBoxClientConfig(user, rt))
+		serveConfigArtifact(w, user, rt, "sing-box", fmt.Sprintf(`"%s-sing-box.json"`, user.Name), "application/json; charset=utf-8")
 	case "clash.yaml":
-		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-clash.yaml"`, user.Name))
-		fmt.Fprint(w, clashConfig(user, rt))
+		serveConfigArtifact(w, user, rt, "clash", fmt.Sprintf(`"%s-clash.yaml"`, user.Name), "text/yaml; charset=utf-8")
+	case "clash-android.yaml":
+		serveConfigArtifact(w, user, rt, "clash-android", fmt.Sprintf(`"%s-clash-android.yaml"`, user.Name), "text/yaml; charset=utf-8")
 	case "vless.txt":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-vless.txt"`, user.Name))
-		fmt.Fprint(w, vlessURL(user, rt))
+		serveConfigArtifact(w, user, rt, "vless", fmt.Sprintf(`"%s-vless.txt"`, user.Name), "text/plain; charset=utf-8")
 	default:
 		writeError(w, http.StatusBadRequest, errors.New("unknown public config kind"))
 	}
@@ -909,8 +916,12 @@ func rocketImportURL(r *http.Request, user vpnUser) string {
 }
 
 func clashImportURL(r *http.Request, user vpnUser) string {
-	profileURL := externalBaseURL(r) + "/api/vpn/public/" + user.UUID + "/clash.yaml"
+	profileURL := externalBaseURL(r) + "/api/vpn/public/" + user.UUID + "/clash-android.yaml"
 	return "clashmeta://install-config?url=" + url.QueryEscape(profileURL)
+}
+
+func clashAndroidImportURL(r *http.Request, user vpnUser) string {
+	return clashImportURL(r, user)
 }
 
 func externalBaseURL(r *http.Request) string {
@@ -1126,15 +1137,58 @@ func clashBypassRules(serverHost string) string {
 `, host)
 }
 
-func clashConfig(user vpnUser, rt vpnRuntime) string {
+func clashForeignDomainRules() string {
+	return `  - DOMAIN-SUFFIX,google.com,PROXY
+  - DOMAIN-SUFFIX,googleapis.com,PROXY
+  - DOMAIN-SUFFIX,gstatic.com,PROXY
+  - DOMAIN-SUFFIX,ggpht.com,PROXY
+  - DOMAIN-SUFFIX,googlevideo.com,PROXY
+  - DOMAIN-SUFFIX,youtube.com,PROXY
+  - DOMAIN-SUFFIX,ytimg.com,PROXY
+  - DOMAIN-SUFFIX,facebook.com,PROXY
+  - DOMAIN-SUFFIX,twitter.com,PROXY
+  - DOMAIN-SUFFIX,x.com,PROXY
+  - DOMAIN-SUFFIX,instagram.com,PROXY
+  - DOMAIN-SUFFIX,github.com,PROXY
+  - DOMAIN-SUFFIX,openai.com,PROXY
+  - DOMAIN-SUFFIX,chatgpt.com,PROXY
+`
+}
+
+func clashVlessProxy(user vpnUser, rt vpnRuntime, fingerprint string, includePacketEncoding bool) string {
 	flowLine := ""
+	packetEncodingLine := ""
 	if flow := vpnUserFlow(user); flow != "" {
 		flowLine = fmt.Sprintf("    flow: %s\n", flow)
+		if includePacketEncoding {
+			packetEncodingLine = "    packet-encoding: xudp\n"
+		}
 	}
+	return fmt.Sprintf(`  - name: %s
+    type: vless
+    server: %s
+    port: %d
+    uuid: %s
+    udp: true
+    encryption: none
+%s%s    tls: true
+    servername: %s
+    client-fingerprint: %s
+    skip-cert-verify: true
+    reality-opts:
+      public-key: %s
+      short-id: %s
+    network: tcp
+`, user.Name, rt.ServerHost, rt.Port, user.UUID, flowLine, packetEncodingLine, rt.SNI, fingerprint, rt.PublicKey, rt.ShortID)
+}
+
+func clashConfig(user vpnUser, rt vpnRuntime) string {
 	bypassRules := clashBypassRules(rt.ServerHost)
 	dnsPolicyLine := ""
+	fakeIPFilterLine := ""
 	if host := strings.TrimSpace(rt.ServerHost); host != "" {
 		dnsPolicyLine = fmt.Sprintf("    '%s': system\n", host)
+		fakeIPFilterLine = fmt.Sprintf("    - '%s'\n", host)
 	}
 	return fmt.Sprintf(`mixed-port: 7890
 allow-lan: false
@@ -1149,113 +1203,200 @@ dns:
   enable: true
   enhanced-mode: fake-ip
   default-nameserver:
+    - system
     - 223.5.5.5
     - 119.29.29.29
-  nameserver:
-    - https://dns.alidns.com/dns-query
+  fake-ip-filter:
+    - '+.lan'
+%s  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
   nameserver-policy:
 %s
 proxies:
-  - name: %s
-    type: vless
-    server: %s
-    port: %d
-    uuid: %s
-    udp: true
 %s
-    packet-encoding: xudp
-    tls: true
-    servername: %s
-    client-fingerprint: chrome
-    skip-cert-verify: true
-    reality-opts:
-      public-key: %s
-      short-id: %s
-    encryption: ""
-    network: tcp
-
 proxy-groups:
   - name: PROXY
     type: select
     proxies:
       - %s
-      - DIRECT
 
 rules:
 %s  - GEOIP,CN,DIRECT
   - MATCH,PROXY
-`, dnsPolicyLine, user.Name, rt.ServerHost, rt.Port, user.UUID, flowLine, rt.SNI, rt.PublicKey, rt.ShortID, user.Name, bypassRules)
+`, fakeIPFilterLine, dnsPolicyLine, clashVlessProxy(user, rt, "chrome", true), user.Name, bypassRules)
+}
+
+func clashAndroidConfig(user vpnUser, rt vpnRuntime) string {
+	bypassRules := clashBypassRules(rt.ServerHost)
+	foreignRules := clashForeignDomainRules()
+	serverPolicyLine := ""
+	if host := strings.TrimSpace(rt.ServerHost); host != "" {
+		serverPolicyLine = fmt.Sprintf("    '%s': system\n", host)
+	}
+	return fmt.Sprintf(`mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+tcp-concurrent: false
+connect-timeout: 10000
+keep-alive-interval: 15
+unified-delay: false
+geodata-mode: true
+geo-auto-update: true
+geox-url:
+  geoip: "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
+  geosite: "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
+  mmdb: "https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
+
+profile:
+  store-selected: true
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: redir-host
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - https://dns.alidns.com/dns-query
+    - 223.5.5.5
+  fallback:
+    - https://1.1.1.1/dns-query
+    - https://dns.google/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+    geosite:
+      - gfw
+  nameserver-policy:
+%s
+proxies:
+%s
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - %s
+
+rules:
+%s%s  - GEOIP,private,DIRECT,no-resolve
+  - GEOSITE,cn,DIRECT
+  - GEOIP,CN,DIRECT,no-resolve
+  - GEOSITE,gfw,PROXY
+  - MATCH,PROXY
+`, serverPolicyLine, clashVlessProxy(user, rt, "chrome", true), user.Name, bypassRules, foreignRules)
+}
+
+func singBoxChinaDirectDomains() []string {
+	return []string{
+		".cn",
+		".baidu.com",
+		".qq.com",
+		".weixin.qq.com",
+		".taobao.com",
+		".alipay.com",
+		".bilibili.com",
+		".163.com",
+		".126.com",
+	}
+}
+
+func singBoxForeignProxyDomains() []string {
+	return []string{
+		".google.com",
+		".googleapis.com",
+		".googlevideo.com",
+		".gstatic.com",
+		".ggpht.com",
+		".youtube.com",
+		".ytimg.com",
+		".facebook.com",
+		".twitter.com",
+		".x.com",
+		".instagram.com",
+		".github.com",
+		".openai.com",
+		".chatgpt.com",
+	}
 }
 
 func singBoxClientConfig(user vpnUser, rt vpnRuntime) string {
-	vlessOutbound := map[string]any{
-		"type":            "vless",
-		"tag":             user.Name,
-		"server":          rt.ServerHost,
-		"server_port":     rt.Port,
-		"uuid":            user.UUID,
-		"packet_encoding": "xudp",
-		"tls": map[string]any{
-			"enabled":     true,
-			"server_name": rt.SNI,
-			"utls":        map[string]any{"enabled": true, "fingerprint": "chrome"},
-			"reality": map[string]any{
-				"enabled":    true,
-				"public_key": rt.PublicKey,
-				"short_id":   rt.ShortID,
-			},
+	tlsBlock := map[string]any{
+		"enabled":     true,
+		"server_name": rt.SNI,
+		"utls":        map[string]any{"enabled": true, "fingerprint": "chrome"},
+		"reality": map[string]any{
+			"enabled":    true,
+			"public_key": rt.PublicKey,
+			"short_id":   rt.ShortID,
 		},
+	}
+	vlessOutbound := map[string]any{
+		"type":        "vless",
+		"tag":         user.Name,
+		"server":      rt.ServerHost,
+		"server_port": rt.Port,
+		"uuid":        user.UUID,
+		"tls":         tlsBlock,
 	}
 	if flow := vpnUserFlow(user); flow != "" {
 		vlessOutbound["flow"] = flow
+		vlessOutbound["packet_encoding"] = "xudp"
 	}
 	config := map[string]any{
 		"log": map[string]any{"level": "info", "timestamp": true},
 		"dns": map[string]any{
 			"servers": []any{
+				map[string]any{"type": "local", "tag": "local"},
 				map[string]any{
-					"type":        "https",
-					"tag":         "cloudflare",
-					"server":      "1.1.1.1",
-					"server_port": 443,
-					"path":        "/dns-query",
-					"detour":      user.Name,
-					"tls": map[string]any{
-						"enabled":     true,
-						"server_name": "cloudflare-dns.com",
+					"type":   "https",
+					"tag":    "dns-proxy",
+					"server": "dns.google",
+					"domain_resolver": map[string]any{
+						"server": "local",
 					},
+					"detour": user.Name,
 				},
-				map[string]any{"type": "local", "tag": "local", "detour": "direct"},
 			},
-			"final":    "cloudflare",
+			"rules": []any{
+				map[string]any{
+					"domain_suffix": singBoxForeignProxyDomains(),
+					"server":        "dns-proxy",
+				},
+			},
+			"final":    "local",
 			"strategy": "ipv4_only",
 		},
-			"inbounds": []any{
-				map[string]any{
-					"type":                  "tun",
-					"tag":                   "tun-in",
-					"address":               []string{"172.19.0.1/30"},
-					"auto_route":            true,
-					"strict_route":          false,
-					"mtu":                   1400,
-					"stack":                 "mixed",
-					"route_exclude_address": []string{rt.ServerHost + "/32"},
-					"exclude_package":       []string{"io.nekohasekai.sfa"},
-				},
+		"inbounds": []any{
+			map[string]any{
+				"type":                    "tun",
+				"tag":                     "tun-in",
+				"address":                 []string{"172.19.0.1/30"},
+				"auto_route":              true,
+				"strict_route":            false,
+				"mtu":                     1400,
+				"stack":                   "system",
+				"sniff":                   true,
+				"sniff_override_destination": true,
+				"route_exclude_address":   []string{rt.ServerHost + "/32"},
+				"exclude_package":         []string{"io.nekohasekai.sfa"},
 			},
-			"outbounds": []any{
-				vlessOutbound,
-				map[string]any{"type": "direct", "tag": "direct"},
-			},
+		},
+		"outbounds": []any{
+			vlessOutbound,
+			map[string]any{"type": "direct", "tag": "direct"},
+		},
 		"route": map[string]any{
-				"default_domain_resolver": "local",
-				"rules": []any{
-					map[string]any{"protocol": "dns", "action": "hijack-dns"},
-					map[string]any{"port": 53, "action": "hijack-dns"},
-					map[string]any{"ip_cidr": []string{rt.ServerHost + "/32"}, "outbound": "direct"},
-					map[string]any{"ip_is_private": true, "outbound": "direct"},
-				},
-			"final":                 user.Name,
+			"default_domain_resolver": "local",
+			"rules": []any{
+				map[string]any{"ip_cidr": []string{rt.ServerHost + "/32"}, "outbound": "direct"},
+				map[string]any{"ip_is_private": true, "outbound": "direct"},
+				map[string]any{"domain_suffix": singBoxChinaDirectDomains(), "outbound": "direct"},
+				map[string]any{"domain_suffix": singBoxForeignProxyDomains(), "outbound": user.Name},
+			},
+			"final":                 "direct",
 			"auto_detect_interface": false,
 		},
 	}
@@ -1287,13 +1428,15 @@ func rocketProfile(user vpnUser, rt vpnRuntime) (map[string]any, error) {
 }
 
 func writeRocketProfile(w http.ResponseWriter, user vpnUser, rt vpnRuntime) error {
-	profile, err := rocketProfile(user, rt)
+	artifact, err := rocketConfigArtifact(user, rt)
 	if err != nil {
 		return err
 	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(profile)
+	w.Header().Set("X-VPN-Config-Version", artifact.Version)
+	w.Header().Set("X-VPN-Config-Checksum", artifact.Checksum)
+	w.Header().Set("X-VPN-Config-Template-Revision", vpnConfigTemplateRevision)
+	_, err = fmt.Fprint(w, artifact.Content)
+	return err
 }
 
 func rocketProfileToken(uuid string) string {

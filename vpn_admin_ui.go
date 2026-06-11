@@ -219,6 +219,33 @@ const vpnAdminHTML = `<!doctype html>
     .deviceItem.online { border-color: #9ec5ff; background: #f8fbff; }
     .deviceMeta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .configLayout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+    .configMeta {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: var(--panel2);
+      margin-bottom: 14px;
+    }
+    .configMeta h3 { margin: 0 0 8px; font-size: 14px; }
+    .configMeta table { margin: 8px 0 0; }
+    .configMeta td code { font-size: 12px; word-break: break-all; }
+    .configMeta .actions { margin-top: 0; }
+    .configValidate {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: #fff;
+      margin-bottom: 14px;
+    }
+    .configValidate h3 { margin: 0 0 8px; font-size: 14px; }
+    .validateItem { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+    .validateItem:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+    .validateHead { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+    .validateChecks { margin: 0; padding-left: 18px; line-height: 1.6; font-size: 12px; }
+    .validateChecks .checkOk { color: var(--green); }
+    .validateChecks .checkBad { color: var(--red); }
+    .yamlValidateBox { margin-top: 14px; display: grid; gap: 8px; }
+    .yamlValidateBox textarea { min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
     .methodList { margin: 0; padding-left: 20px; color: var(--text); line-height: 1.75; }
     .qrBox {
       display: grid;
@@ -696,6 +723,148 @@ const vpnAdminHTML = `<!doctype html>
           + '</tr>';
       }).join("");
     }
+    function renderValidationItems(items) {
+      if (!Array.isArray(items) || !items.length) return "";
+      return items.map((item) => {
+        const checks = (item.checks || []).map((check) => {
+          return '<li class="' + (check.ok ? "checkOk" : "checkBad") + '">'
+            + escapeHTML(check.name) + "：" + escapeHTML(check.message || "")
+            + '</li>';
+        }).join("");
+        return '<div class="validateItem">'
+          + '<div class="validateHead"><b>' + escapeHTML(item.label || item.kind) + '</b>'
+          + '<span class="' + (item.ok ? "statusOk" : "statusBad") + '">' + escapeHTML(item.status || (item.ok ? "可用" : "不可用")) + '</span></div>'
+          + '<ul class="validateChecks">' + checks + '</ul></div>';
+      }).join("");
+    }
+    function mountConfigValidation(base, kind, cacheKey) {
+      const host = $("configValidate");
+      if (!host) return;
+      const queryKind = kind === "clash" ? "clash" : kind;
+      host.innerHTML = '<p class="note">正在检测配置可用性...</p>';
+      fetch(base + "validate?kind=" + encodeURIComponent(queryKind) + "&v=" + cacheKey, { credentials: "same-origin" })
+        .then((res) => {
+          if (!res.ok) throw new Error("validate HTTP " + res.status);
+          return res.json();
+        })
+        .then((result) => {
+          const summary = result.ok
+            ? '<p class="statusOk" style="margin:0 0 8px;">服务端当前配置检测通过，可以导入。</p>'
+            : '<p class="statusBad" style="margin:0 0 8px;">服务端当前配置存在问题，请先修复后再导入。</p>';
+          host.innerHTML = '<h3>配置可用性检测</h3>' + summary + renderValidationItems(result.items || []);
+        })
+        .catch(() => {
+          host.innerHTML = '<p class="note">无法完成配置检测，请刷新后重试。</p>';
+        });
+    }
+    function mountYamlPasteValidation(base, kind) {
+      const btn = $("yamlValidateBtn");
+      const input = $("yamlValidateInput");
+      const result = $("yamlValidateResult");
+      if (!btn || !input || !result) return;
+      btn.onclick = async () => {
+        const content = input.value.trim();
+        if (!content) {
+          setMsg("message", "请先粘贴 YAML 内容", true);
+          return;
+        }
+        const validateKind = kind === "clash" ? "clash-android" : kind;
+        btn.disabled = true;
+        result.innerHTML = '<p class="note">检测中...</p>';
+        try {
+          const res = await fetch(base + "validate-yaml", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ kind: validateKind, content })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+          const item = (data.items || [])[0];
+          if (!item) {
+            result.innerHTML = '<p class="note">未返回检测结果</p>';
+            return;
+          }
+          const head = item.ok
+            ? '<p class="statusOk" style="margin:0 0 8px;">这份 YAML 可以使用。</p>'
+            : '<p class="statusBad" style="margin:0 0 8px;">这份 YAML 存在问题，请勿导入。</p>';
+          result.innerHTML = head + renderValidationItems([item]);
+        } catch (err) {
+          result.innerHTML = '<p class="statusBad">检测失败：' + escapeHTML(err.message || String(err)) + '</p>';
+        } finally {
+          btn.disabled = false;
+        }
+      };
+    }
+    function manifestKindsForUI(kind) {
+      if (kind === "clash") return ["clash-android", "clash"];
+      return [kind];
+    }
+    function renderConfigManifest(manifest, kind) {
+      if (!manifest || !Array.isArray(manifest.items)) return "";
+      const wanted = new Set(manifestKindsForUI(kind));
+      const items = manifest.items.filter((item) => wanted.has(item.kind));
+      if (!items.length) return "";
+      const rows = items.map((item) => {
+        return '<tr>'
+          + '<td>' + escapeHTML(item.label || item.kind) + '</td>'
+          + '<td><code>' + escapeHTML(item.version || "-") + '</code></td>'
+          + '<td><code>' + escapeHTML(item.checksum || "-") + '</code>'
+          + ' <button type="button" data-copy-checksum="' + escapeHTML(item.checksum || "") + '">复制</button></td>'
+          + '</tr>';
+      }).join("");
+      return '<div class="configMeta">'
+        + '<h3>配置版本号 / 校验和</h3>'
+        + '<p class="note">导入前请核对下载内容与下表一致。YAML/文本文件前两行含 <code># vpn-config-version</code> 与 <code># vpn-config-checksum</code>；小火箭 JSON 含 <code>config_version</code> / <code>config_checksum</code> 字段；sing-box 远程导入请对照本页版本号，或先下载 JSON 并查看响应头。</p>'
+        + '<table><thead><tr><th>类型</th><th>版本号</th><th>校验和</th></tr></thead><tbody>' + rows + '</tbody></table>'
+        + '<p class="note">模板修订 <code>' + escapeHTML(manifest.template_revision || "-") + '</code>'
+        + ' · 运行时指纹 <code>' + escapeHTML(manifest.runtime_checksum || "-") + '</code>'
+        + (manifest.user_updated_at ? ' · 账号更新 ' + escapeHTML(manifest.user_updated_at) : '')
+        + '</p></div>';
+    }
+    function bindConfigManifestCopy(root) {
+      if (!root) return;
+      root.querySelectorAll("[data-copy-checksum]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const checksum = button.getAttribute("data-copy-checksum") || "";
+          if (!checksum) return;
+          let ok = false;
+          if (navigator.clipboard && window.isSecureContext) {
+            try {
+              await navigator.clipboard.writeText(checksum);
+              ok = true;
+            } catch (err) {
+              ok = false;
+            }
+          }
+          if (ok) {
+            const oldText = button.textContent;
+            button.textContent = "已复制";
+            setMsg("message", "校验和已复制", false);
+            setTimeout(() => { button.textContent = oldText; }, 1600);
+          } else {
+            setMsg("message", "复制失败，请手动选择校验和", true);
+          }
+        });
+      });
+    }
+    function mountConfigManifest(base, kind, cacheKey) {
+      const host = $("configMeta");
+      if (!host) return;
+      host.innerHTML = '<p class="note">正在读取配置版本信息...</p>';
+      fetch(base + "manifest?v=" + cacheKey, { credentials: "same-origin" })
+        .then((res) => {
+          if (!res.ok) throw new Error("manifest HTTP " + res.status);
+          return res.json();
+        })
+        .then((manifest) => {
+          host.innerHTML = renderConfigManifest(manifest, kind) || '<p class="note">暂无版本信息</p>';
+          bindConfigManifestCopy(host);
+        })
+        .catch(() => {
+          host.innerHTML = '<p class="note">无法读取配置版本信息，请刷新后重试。</p>';
+        });
+    }
     function openConfig(userId, kind) {
       const user = usersById.get(String(userId));
       if (!user) return;
@@ -716,29 +885,31 @@ const vpnAdminHTML = `<!doctype html>
           + '<h3>导入链接</h3><textarea id="rocketImportText" readonly>正在读取导入链接...</textarea>';
 	        side = '<div class="qrBox"><img id="configQr" class="loading" alt="clg 小火箭导入二维码"><p class="qrStatus">二维码加载中...</p><p class="note">二维码内容是 clg 的小火箭专用导入链接，包含短 token；用户停用后配置接口会拒绝访问。</p></div>';
       } else if (kind === "clash") {
-        actions = '<a id="openClashImport" class="button primary" href="#">一键导入 Clash Meta</a><button id="copyClashImport">复制导入链接</button><a class="button" href="' + base + 'clash">下载 Clash YAML</a>';
-        methods = '<h3>安卓手机安装</h3>'
-          + '<ol class="methodList"><li>优先下载 ARM64 APK；如果不确定手机架构，下载 Universal APK。</li><li>安装时如提示未知来源，需要在系统设置中允许本浏览器安装应用。</li><li>安装后回到本页，点击“一键导入 Clash Meta”或扫描右侧二维码导入配置。</li><li>进入 Clash Meta 后启动 VPN，并确认当前配置已选中。</li></ol>'
+        actions = '<a id="openClashImport" class="button primary" href="#">手机扫码/一键导入</a><a class="button" href="' + base + 'clash-android">下载 Android YAML</a><button id="copyClashImport">复制导入链接</button><a class="button" href="' + base + 'clash">下载电脑 YAML</a>';
+        methods = '<h3>安卓手机（推荐）</h3>'
+          + '<ol class="methodList"><li>先在 Clash Meta 里删除所有旧配置，并关闭 VPN。</li><li>优先扫描右侧二维码，或点击“手机扫码/一键导入”。</li><li>如果必须手动导入，请在手机浏览器直接打开本页，下载 <b>Android YAML</b>；不要用电脑下载后再转发到手机。</li><li>导入后确认节点名是 <code>' + escapeHTML(user.name) + '</code>，UUID 以 <code>' + escapeHTML(user.uuid.slice(0, 8)) + '</code> 开头。</li><li>Android 版使用<b>规则模式</b>：国内网站/App 直连，国外走代理。请勿在 Clash Meta 里手动切成全局模式。</li><li>启动 VPN 后，先测百度/微信是否正常，再测 Google 验证代理。</li></ol>'
           + '<div class="actions" style="margin:12px 0 18px;"><a class="button" target="_blank" href="https://github.com/MetaCubeX/ClashMetaForAndroid/releases/download/v2.11.28/cmfa-2.11.28-meta-arm64-v8a-release.apk">下载 Android ARM64 APK</a><a class="button" target="_blank" href="https://github.com/MetaCubeX/ClashMetaForAndroid/releases/download/v2.11.28/cmfa-2.11.28-meta-universal-release.apk">下载 Android Universal APK</a><a class="button" target="_blank" href="https://github.com/MetaCubeX/ClashMetaForAndroid/releases">更多 APK 版本</a></div>'
           + '<h3>电脑 Clash Verge</h3>'
-          + '<ol class="methodList"><li>电脑端使用 Clash Verge Rev，先从发布页安装对应系统版本。</li><li>点击“下载 Clash YAML”。</li><li>打开 Clash Verge，进入“订阅/配置”。</li><li>选择从本地文件导入，选中刚下载的 YAML。</li><li>切换到该配置，并在代理组中选择本节点。</li></ol>'
+          + '<ol class="methodList"><li>电脑端使用 Clash Verge Rev，先从发布页安装对应系统版本。</li><li>点击“下载电脑 YAML”。</li><li>打开 Clash Verge，进入“订阅/配置”。</li><li>选择从本地文件导入，选中刚下载的 YAML。</li><li>切换到该配置，并在代理组中选择本节点。</li></ol>'
           + '<div class="actions" style="margin:12px 0 18px;"><a class="button" target="_blank" href="https://github.com/clash-verge-rev/clash-verge-rev/releases">下载 Clash Verge Rev</a></div>'
-          + '<h3>导入链接</h3><textarea id="clashImportText" readonly>正在读取导入链接...</textarea>';
-	        side = '<div class="qrBox"><img id="configQr" class="loading" alt="Clash Meta 导入二维码"><p class="qrStatus">二维码加载中...</p><p class="note">二维码内容是 Clash Meta 配置导入链接，不是 VLESS 分享链接。</p></div>';
+          + '<h3>导入链接</h3><textarea id="clashImportText" readonly>正在读取导入链接...</textarea>'
+          + '<div class="yamlValidateBox"><h3>检测本地 YAML</h3>'
+          + '<p class="note">导入前可粘贴 YAML 内容（或下载后打开复制），点击检测确认节点、UUID、Reality 参数是否正确。</p>'
+          + '<textarea id="yamlValidateInput" placeholder="粘贴 Clash YAML..."></textarea>'
+          + '<div class="actions"><button type="button" id="yamlValidateBtn">检测 YAML 是否可用</button></div>'
+          + '<div id="yamlValidateResult"></div></div>';
+	        side = '<div class="qrBox"><img id="configQr" class="loading" alt="Clash Meta 导入二维码"><p class="qrStatus">二维码加载中...</p><p class="note">二维码会导入 Android 专用 Clash 配置（规则模式：国内直连，国外走代理）。不是 VLESS 分享链接。</p></div>';
       } else if (kind === "sing-box") {
-        actions = '<a id="openSingBoxImport" class="button primary" href="#">一键导入 sing-box</a><button id="copySingBoxImport">复制导入链接</button><a class="button" href="' + base + 'sing-box">下载 JSON 配置</a>';
-        methods = '<h3>推荐导入方式</h3>'
-          + '<ol class="methodList"><li>手机端优先扫描右侧二维码，这是 sing-box 官方远程配置导入链接。</li><li>如果无法唤起 App，点击“一键导入 sing-box”或复制导入链接到浏览器打开。</li><li>远程配置的好处是以后服务端配置更新后，客户端可以重新拉取配置。</li><li>导入后启用该配置，确认出口 IP 变为服务器所在地区。</li></ol>'
+        actions = '<a class="button primary" href="' + base + 'sing-box">下载 JSON 配置</a><button id="copySingBoxJson">复制 JSON 到剪贴板</button>';
+        methods = '<div class="note" style="margin-bottom:12px;border:1px solid #f0ad4e;background:#fff8e6;padding:10px;"><strong>不要扫远程导入二维码，也不要选「远程配置」。</strong>扫码会去拉 <code>http://54.150.9.209/.../sing-box.json</code>，国内未连 VPN 前几乎必报 <code>connection reset by peer</code>。这是网络限制，不是账号坏了。</div>'
+          + '<h3>Android 正确导入（本地配置）</h3>'
+          + '<ol class="methodList"><li>在<b>电脑或手机浏览器</b>登录本管理页，点「下载 JSON 配置」。</li><li>用文本编辑器打开 JSON，确认 <code>uuid</code> 与上方清单一致（以 <code>' + escapeHTML(user.uuid.slice(0, 8)) + '</code> 开头）。</li><li>把 JSON 保存到手机（微信传文件 / 文件管理器 / 浏览器下载目录）。</li><li>sing-box → 配置文件 → 右上角 <b>+</b> → 类型选「<b>本地</b>」→ 从文件导入。</li><li><strong>关闭「自动更新」</strong>（本地配置不需要远程拉取）。</li><li>启用配置，允许 VPN 权限，先测 YouTube App。</li></ol>'
+          + '<h3>或用剪贴板</h3>'
+          + '<ol class="methodList"><li>点上方「复制 JSON 到剪贴板」（需在管理页操作）。</li><li>sing-box → + → 本地 → 粘贴/从剪贴板导入（若 App 支持）。</li></ol>'
           + '<h3>Android 安装</h3>'
-          + '<ol class="methodList"><li>Android 5.0+ 可用；新手机优先下载 ARM64 APK。</li><li>如果不确定手机架构，下载 Universal APK。</li><li>安装时如提示未知来源，需要在系统设置中允许本浏览器安装应用。</li><li>安装完成后回到本页，扫描右侧二维码或点击“一键导入 sing-box”。</li></ol>'
-          + '<div class="actions" style="margin:12px 0 18px;"><a class="button" target="_blank" href="https://github.com/SagerNet/sing-box/releases/download/v1.13.12/SFA-1.13.12-arm64-v8a.apk">下载 Android ARM64 APK</a><a class="button" target="_blank" href="https://github.com/SagerNet/sing-box/releases/download/v1.13.12/SFA-1.13.12-universal.apk">下载 Android Universal APK</a><a class="button" target="_blank" href="https://github.com/SagerNet/sing-box/releases">更多 APK 版本</a></div>'
-          + '<h3>iPhone / iPad / Mac</h3>'
-          + '<ol class="methodList"><li>优先从 App Store 或 TestFlight 安装 sing-box Apple 平台客户端。</li><li>安装完成后，用系统相机或 sing-box 内的导入功能扫描右侧二维码。</li><li>如果扫描后没有自动跳转，复制导入链接后用 Safari 打开。</li></ol>'
-          + '<div class="actions" style="margin:12px 0 18px;"><a class="button" target="_blank" href="https://sing-box.sagernet.org/clients/">打开官方客户端页面</a><a class="button" target="_blank" href="https://sing-box.sagernet.org/clients/android/">Android 官方说明</a></div>'
-          + '<h3>桌面 / 手动导入</h3>'
-          + '<ol class="methodList"><li>如果客户端不支持远程导入，点击“下载 JSON 配置”。</li><li>在 sing-box 客户端中新建本地配置，导入下载的 JSON 文件。</li><li>保存后启用配置；如果无法连接，先确认系统 VPN 权限已允许。</li></ol>'
-          + '<h3>导入链接</h3><textarea id="singBoxImportText" readonly>正在读取导入链接...</textarea>';
-	        side = '<div class="qrBox"><img id="configQr" class="loading" alt="sing-box 导入二维码"><p class="qrStatus">二维码加载中...</p><p class="note">二维码内容是 sing-box 远程配置导入链接，不是 VLESS 分享链接。</p></div>';
+          + '<div class="actions" style="margin:12px 0 18px;"><a class="button" target="_blank" href="https://github.com/SagerNet/sing-box/releases/download/v1.13.12/SFA-1.13.12-arm64-v8a.apk">下载 Android ARM64 APK</a><a class="button" target="_blank" href="https://github.com/SagerNet/sing-box/releases/download/v1.13.12/SFA-1.13.12-universal.apk">下载 Android Universal APK</a></div>'
+          + '<h3>JSON 配置内容（可核对）</h3><textarea id="singBoxJsonText" readonly>正在读取 JSON 配置...</textarea>';
+	        side = '<div class="qrBox"><p class="note" style="padding:16px;"><strong>Android 不提供远程导入二维码。</strong><br><br>请使用左侧「下载 JSON 配置」做本地导入。<br><br>若仍想用 Clash，请返回列表进入 Clash Meta 页面下载 Android YAML。</p></div>';
       } else {
         actions = '<button id="copyVless" class="primary">复制 VLESS 链接</button><a class="button" href="' + base + 'vless">下载链接文本</a>';
         methods = '<h3>适用客户端</h3>'
@@ -747,12 +918,14 @@ const vpnAdminHTML = `<!doctype html>
           + '<h3>VLESS 链接内容</h3><textarea id="vlessText" readonly>正在读取链接...</textarea>';
 	        side = '<div class="qrBox"><img id="configQr" class="loading" alt="VLESS 分享二维码"><p class="qrStatus">二维码加载中...</p><p class="note">二维码内容是通用 VLESS 分享链接。sing-box JSON 导入失败时，可以用 Hiddify 或 NekoBox 扫这个二维码验证账号是否可用。</p></div>';
       }
-      $("configBody").innerHTML = '<div class="configLayout"><div><div class="actions" style="margin-bottom:14px;">' + actions + '</div>' + methods + '</div>' + side + '</div>';
+      $("configBody").innerHTML = '<div id="configMeta" class="configMeta"></div><div id="configValidate" class="configValidate"></div><div class="configLayout"><div><div class="actions" style="margin-bottom:14px;">' + actions + '</div>' + methods + '</div>' + side + '</div>';
       showView("config");
+      mountConfigManifest(base, kind, cacheKey);
+      mountConfigValidation(base, kind, cacheKey);
+      if (kind === "clash") mountYamlPasteValidation(base, kind);
       const qrKinds = {
         rocket: "rocket-import-qr",
-        clash: "clash-import-qr",
-        "sing-box": "sing-box-import-qr",
+        clash: "clash-android-import-qr",
         vless: "qr"
       };
       if (qrKinds[kind]) {
@@ -765,10 +938,9 @@ const vpnAdminHTML = `<!doctype html>
         });
       }
       if (kind === "sing-box") {
-        fetch(base + "sing-box-import", { credentials: "same-origin" }).then((res) => res.text()).then((text) => {
-          $("singBoxImportText").value = text;
-          $("openSingBoxImport").href = text;
-          $("copySingBoxImport").onclick = () => copyTextFrom("singBoxImportText", "copySingBoxImport", "sing-box 导入链接已复制到剪切板");
+        fetch(base + "sing-box", { credentials: "same-origin" }).then((res) => res.text()).then((text) => {
+          $("singBoxJsonText").value = text;
+          $("copySingBoxJson").onclick = () => copyTextFrom("singBoxJsonText", "copySingBoxJson", "sing-box JSON 已复制，请在 App 中创建「本地」配置并粘贴");
         });
       }
       if (kind === "rocket") {
@@ -778,7 +950,7 @@ const vpnAdminHTML = `<!doctype html>
         });
       }
       if (kind === "clash") {
-        fetch(base + "clash-import", { credentials: "same-origin" }).then((res) => res.text()).then((text) => {
+        fetch(base + "clash-android-import", { credentials: "same-origin" }).then((res) => res.text()).then((text) => {
           $("clashImportText").value = text;
           $("openClashImport").href = text;
           $("copyClashImport").onclick = () => copyTextFrom("clashImportText", "copyClashImport", "Clash Meta 导入链接已复制到剪切板");

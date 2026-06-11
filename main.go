@@ -70,6 +70,7 @@ func main() {
 	mux.HandleFunc("GET /api/vpn/traffic", a.requireLogin(a.vpnTrafficHistory))
 	mux.HandleFunc("PATCH /api/vpn/devices/", a.requireLogin(a.vpnUpdateDevice))
 	mux.HandleFunc("GET /api/vpn/configs/", a.requireLogin(a.vpnConfig))
+	mux.HandleFunc("POST /api/vpn/configs/", a.requireLogin(a.vpnConfigPost))
 	mux.HandleFunc("GET /api/vpn/public/", a.vpnPublicConfig)
 	mux.HandleFunc("GET /api/rocket/profiles/", a.rocketProfile)
 	mux.HandleFunc("OPTIONS /", options)
