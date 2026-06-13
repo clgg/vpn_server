@@ -1353,10 +1353,7 @@ func singBoxClientConfig(user vpnUser, rt vpnRuntime) string {
 				map[string]any{
 					"type":   "https",
 					"tag":    "dns-proxy",
-					"server": "dns.google",
-					"domain_resolver": map[string]any{
-						"server": "local",
-					},
+					"server": "1.1.1.1",
 					"detour": user.Name,
 				},
 			},
@@ -1371,17 +1368,16 @@ func singBoxClientConfig(user vpnUser, rt vpnRuntime) string {
 		},
 		"inbounds": []any{
 			map[string]any{
-				"type":                    "tun",
-				"tag":                     "tun-in",
-				"address":                 []string{"172.19.0.1/30"},
-				"auto_route":              true,
-				"strict_route":            false,
-				"mtu":                     1400,
-				"stack":                   "system",
-				"sniff":                   true,
-				"sniff_override_destination": true,
-				"route_exclude_address":   []string{rt.ServerHost + "/32"},
-				"exclude_package":         []string{"io.nekohasekai.sfa"},
+				"type":                  "tun",
+				"tag":                   "tun-in",
+				"address":               []string{"172.19.0.1/30"},
+				"auto_route":            true,
+				"strict_route":          true,
+				"auto_redirect":         true,
+				"mtu":                   1400,
+				"stack":                 "gvisor",
+				"route_exclude_address": []string{rt.ServerHost + "/32"},
+				"exclude_package":       []string{"io.nekohasekai.sfa"},
 			},
 		},
 		"outbounds": []any{
@@ -1391,12 +1387,14 @@ func singBoxClientConfig(user vpnUser, rt vpnRuntime) string {
 		"route": map[string]any{
 			"default_domain_resolver": "local",
 			"rules": []any{
+				map[string]any{"inbound": "tun-in", "action": "sniff"},
+				map[string]any{"protocol": "dns", "action": "hijack-dns"},
 				map[string]any{"ip_cidr": []string{rt.ServerHost + "/32"}, "outbound": "direct"},
 				map[string]any{"ip_is_private": true, "outbound": "direct"},
 				map[string]any{"domain_suffix": singBoxChinaDirectDomains(), "outbound": "direct"},
 				map[string]any{"domain_suffix": singBoxForeignProxyDomains(), "outbound": user.Name},
 			},
-			"final":                 "direct",
+			"final":                 user.Name,
 			"auto_detect_interface": false,
 		},
 	}

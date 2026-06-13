@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const vpnConfigTemplateRevision = "20260611.10"
+const vpnConfigTemplateRevision = "20260612.8"
 
 type vpnConfigArtifact struct {
 	Kind     string `json:"kind"`
