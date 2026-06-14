@@ -755,21 +755,49 @@ func (m vpnManager) apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	config, err := singBoxServerConfig(users)
+	xrayConfig, err := xrayServerConfig(users)
 	if err != nil {
 		return err
 	}
-	target := env("VPN_SING_BOX_CANDIDATE", "/var/lib/go-sqlite-api/sing-box-config.json")
-	if err := os.MkdirAll(filepath.Dir(target), 0750); err != nil {
+	hy2Config, err := hysteria2ServerConfig(users)
+	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(target, []byte(config), 0600); err != nil {
-		return err
+	xrayTarget := env("VPN_XRAY_CANDIDATE", "/var/lib/go-sqlite-api/xray-config.json")
+	hy2Target := env("VPN_HY2_CANDIDATE", "/var/lib/go-sqlite-api/hysteria2-config.yaml")
+	for _, item := range []struct {
+		path    string
+		content string
+	}{
+		{xrayTarget, xrayConfig},
+		{hy2Target, hy2Config},
+	} {
+		if err := os.MkdirAll(filepath.Dir(item.path), 0750); err != nil {
+			return err
+		}
+		if err := os.WriteFile(item.path, []byte(item.content), 0600); err != nil {
+			return err
+		}
 	}
-	cmd := exec.CommandContext(ctx, "sudo", "/usr/local/sbin/vpn-admin-apply", target)
+	for _, port := range hy2ExtraPorts() {
+		extraConfig, err := hysteria2ServerConfigForPort(port, hy2PortUsesObfs(port), users)
+		if err != nil {
+			return err
+		}
+		extraPath := filepath.Join(filepath.Dir(hy2Target), fmt.Sprintf("hysteria2-config-%d.yaml", port))
+		if err := os.WriteFile(extraPath, []byte(extraConfig), 0600); err != nil {
+			return err
+		}
+	}
+	// Keep sing-box JSON around for legacy tooling; server now runs xray + hysteria2.
+	if legacy, err := singBoxServerConfig(users); err == nil {
+		legacyTarget := env("VPN_SING_BOX_CANDIDATE", "/var/lib/go-sqlite-api/sing-box-config.json")
+		_ = os.WriteFile(legacyTarget, []byte(legacy), 0600)
+	}
+	cmd := exec.CommandContext(ctx, "sudo", "/usr/local/sbin/vpn-admin-apply")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("apply sing-box config: %w: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("apply vpn server config: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -1194,10 +1222,13 @@ func clashConfig(user vpnUser, rt vpnRuntime) string {
 allow-lan: false
 mode: rule
 log-level: info
-tcp-concurrent: true
-connect-timeout: 5000
+tcp-concurrent: false
+connect-timeout: 15000
 keep-alive-interval: 15
 unified-delay: false
+
+profile:
+  store-selected: true
 
 dns:
   enable: true
@@ -1214,17 +1245,14 @@ dns:
   nameserver-policy:
 %s
 proxies:
-%s
+%s%s
 proxy-groups:
-  - name: PROXY
-    type: select
-    proxies:
-      - %s
+%s
 
 rules:
 %s  - GEOIP,CN,DIRECT
   - MATCH,PROXY
-`, fakeIPFilterLine, dnsPolicyLine, clashVlessProxy(user, rt, "chrome", true), user.Name, bypassRules)
+`, fakeIPFilterLine, dnsPolicyLine, clashVlessProxy(user, rt, "chrome", false), clashAllHy2Proxies(user, rt), clashProxyGroup(user), bypassRules)
 }
 
 func clashAndroidConfig(user vpnUser, rt vpnRuntime) string {
@@ -1273,12 +1301,9 @@ dns:
   nameserver-policy:
 %s
 proxies:
-%s
+%s%s
 proxy-groups:
-  - name: PROXY
-    type: select
-    proxies:
-      - %s
+%s
 
 rules:
 %s%s  - GEOIP,private,DIRECT,no-resolve
@@ -1286,7 +1311,7 @@ rules:
   - GEOIP,CN,DIRECT,no-resolve
   - GEOSITE,gfw,PROXY
   - MATCH,PROXY
-`, serverPolicyLine, clashVlessProxy(user, rt, "chrome", true), user.Name, bypassRules, foreignRules)
+`, serverPolicyLine, clashVlessProxy(user, rt, "chrome", true), clashAllHy2Proxies(user, rt), clashProxyGroup(user), bypassRules, foreignRules)
 }
 
 func singBoxChinaDirectDomains() []string {

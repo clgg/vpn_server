@@ -1,0 +1,74 @@
+# Re-download from vpn-admin after server apply for fresh auth/checksum lines.
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+tcp-concurrent: false
+connect-timeout: 15000
+keep-alive-interval: 15
+unified-delay: false
+
+dns:
+  enable: true
+  enhanced-mode: fake-ip
+  default-nameserver:
+    - system
+    - 223.5.5.5
+    - 119.29.29.29
+  fake-ip-filter:
+    - '+.lan'
+    - '54.150.9.209'
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver-policy:
+    '54.150.9.209': system
+
+proxies:
+  - name: owner-hy2
+    type: hysteria2
+    server: 54.150.9.209
+    port: 8443
+    password: "owner:YOUR_HY2_PASSWORD"
+    up: 100
+    down: 100
+    obfs: salamander
+    obfs-password: YOUR_HY2_OBFS_PASSWORD
+    sni: www.bing.com
+    skip-cert-verify: true
+  - name: owner
+    type: vless
+    server: 54.150.9.209
+    port: 443
+    uuid: da289730-2524-44f4-8d76-d6a7af321084
+    udp: true
+    encryption: none
+    flow: xtls-rprx-vision
+    tls: true
+    servername: www.cloudflare.com
+    client-fingerprint: chrome
+    skip-cert-verify: true
+    reality-opts:
+      public-key: CySRzCqeD6Kf1vhsR0n0ElvFGTuV_oinuwM44AXb6mk
+      short-id: 625498d8baa50d01
+    network: tcp
+
+proxy-groups:
+  - name: PROXY
+    type: url-test
+    proxies:
+      - owner-hy2
+      - owner
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 100
+
+rules:
+  - IP-CIDR,54.150.9.209/32,DIRECT,no-resolve
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve
+  - GEOIP,CN,DIRECT
+  - MATCH,PROXY

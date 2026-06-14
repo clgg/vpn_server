@@ -55,11 +55,25 @@ if [ ! -f /etc/go-sqlite-api/vpn.env ]; then
   echo "WARNING: created /etc/go-sqlite-api/vpn.env from template; edit it before exporting client configs"
 fi
 sudo install -m 755 "${APP_DIR}/deploy/vpn-healthcheck.sh" /usr/local/sbin/vpn-healthcheck.sh
+sudo install -m 755 "${APP_DIR}/deploy/vpn-admin-apply.sh" /usr/local/sbin/vpn-admin-apply
+sudo install -m 440 "${APP_DIR}/deploy/goapi-vpn-admin.sudoers" /etc/sudoers.d/goapi-vpn-admin
+sudo visudo -cf /etc/sudoers.d/goapi-vpn-admin
+sudo install -d -m 755 /etc/hysteria /var/log/xray
+sudo cp "${APP_DIR}/deploy/hysteria-server.service" /etc/systemd/system/hysteria-server.service
 sudo cp "${APP_DIR}/deploy/vpn-healthcheck.service" /etc/systemd/system/vpn-healthcheck.service
 sudo cp "${APP_DIR}/deploy/vpn-healthcheck.timer" /etc/systemd/system/vpn-healthcheck.timer
 sudo cp "${APP_DIR}/deploy/nginx-go-sqlite-api.conf" /etc/nginx/sites-available/go-sqlite-api
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo ln -sf /etc/nginx/sites-available/go-sqlite-api /etc/nginx/sites-enabled/go-sqlite-api
+if [ ! -f /etc/nginx/ssl/vpn-admin.crt ]; then
+  sudo install -d -m 755 /etc/nginx/ssl
+  sudo openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/vpn-admin.key \
+    -out /etc/nginx/ssl/vpn-admin.crt \
+    -subj "/CN=${REMOTE_HOST}"
+  sudo chmod 644 /etc/nginx/ssl/vpn-admin.crt
+  sudo chmod 600 /etc/nginx/ssl/vpn-admin.key
+fi
 sudo nginx -t
 sudo systemctl daemon-reload
 sudo systemctl enable --now "${SERVICE_NAME}"

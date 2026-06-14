@@ -17,6 +17,7 @@ const singBoxAccessLogPath = "/var/lib/sing-box/access.log"
 var (
 	singBoxConnFromRE = regexp.MustCompile(`\[(\d+) \d+ms\] inbound/vless\[vless-reality-in\]: inbound connection from ([0-9a-fA-F.:]+):`)
 	singBoxConnUserRE = regexp.MustCompile(`\[(\d+) \d+ms\] inbound/vless\[vless-reality-in\]: \[([^\]]+)\] inbound connection to `)
+	xrayAcceptedRE    = regexp.MustCompile(`from ([0-9a-fA-F.:]+):\d+ accepted .* email: (\S+)`)
 )
 
 type userIPBinding struct {
@@ -67,12 +68,37 @@ func (t *userIPTracker) lookup(sourceIP string) string {
 }
 
 func refreshUserIPMappings(ctx context.Context) {
+	if output, err := xrayAccessLogTail(ctx); err == nil {
+		parseXrayAccessLog(output)
+		return
+	}
 	output, err := singBoxAccessLogTail(ctx)
 	if err != nil {
 		log.Printf("refresh user ip mappings: %v", err)
 		return
 	}
 	parseSingBoxAccessLog(output)
+}
+
+func parseXrayAccessLog(output []byte) {
+	now := time.Now().UTC()
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	for scanner.Scan() {
+		line := scanner.Text()
+		matches := xrayAcceptedRE.FindStringSubmatch(line)
+		if len(matches) != 3 {
+			continue
+		}
+		sessionTracker.remember(matches[1], matches[2], now)
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("parse xray access log: %v", err)
+	}
+}
+
+func xrayAccessLogTail(ctx context.Context) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "tail", "-n", "4000", xrayAccessLogPath)
+	return cmd.Output()
 }
 
 func parseSingBoxAccessLog(output []byte) {

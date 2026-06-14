@@ -1,0 +1,2 @@
+Defaults:goapi !requiretty
+goapi ALL=(root) NOPASSWD: /usr/local/sbin/vpn-admin-apply

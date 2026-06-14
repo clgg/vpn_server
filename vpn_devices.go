@@ -326,7 +326,7 @@ func (m vpnManager) usersWithDevices(ctx context.Context, users []vpnUser) ([]vp
 		for _, user := range users {
 			out = append(out, vpnUserWithDevices{vpnUser: user})
 		}
-		return out, "暂时无法读取 sing-box 在线连接，请确认已重新应用配置且 sing-box 正在运行。", nil
+		return out, "暂时无法读取 xray 在线连接；设备统计依赖 access.log 映射。", nil
 	}
 	out := make([]vpnUserWithDevices, 0, len(users))
 	for _, user := range users {
