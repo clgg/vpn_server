@@ -58,8 +58,7 @@ sudo install -m 755 "${APP_DIR}/deploy/vpn-healthcheck.sh" /usr/local/sbin/vpn-h
 sudo install -m 755 "${APP_DIR}/deploy/vpn-admin-apply.sh" /usr/local/sbin/vpn-admin-apply
 sudo install -m 440 "${APP_DIR}/deploy/goapi-vpn-admin.sudoers" /etc/sudoers.d/goapi-vpn-admin
 sudo visudo -cf /etc/sudoers.d/goapi-vpn-admin
-sudo install -d -m 755 /etc/hysteria /var/log/xray
-sudo cp "${APP_DIR}/deploy/hysteria-server.service" /etc/systemd/system/hysteria-server.service
+sudo install -d -m 755 /var/log/xray
 sudo cp "${APP_DIR}/deploy/vpn-healthcheck.service" /etc/systemd/system/vpn-healthcheck.service
 sudo cp "${APP_DIR}/deploy/vpn-healthcheck.timer" /etc/systemd/system/vpn-healthcheck.timer
 sudo cp "${APP_DIR}/deploy/nginx-go-sqlite-api.conf" /etc/nginx/sites-available/go-sqlite-api

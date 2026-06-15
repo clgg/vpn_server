@@ -2,6 +2,15 @@
 
 本文档供 AI Agent 与维护者快速理解本仓库的自建 VPN 体系。**修改 VPN 相关代码前请先读本文。**
 
+## 0. 当前决策（2026-06-15）
+
+当前已收敛为 **xray / VLESS + REALITY + Vision / TCP 443 单通道**。
+
+- **保留**：Clash Verge Rev 使用 `owner` 等 VLESS 节点，经 `PROXY` 选择器转发。
+- **移除**：Hysteria2 / hy2 / UDP 443 / UDP 51820 / UDP 8443 不再生成客户端配置，也不再作为服务端 Apply 目标。
+- **Apply 行为**：`vpn-admin-apply` 只校验并上线 xray 配置，同时停止并禁用旧的 `hysteria-server*` 服务，清理旧 hy2 candidate/config 文件。
+- **排障优先级**：先看 xray 是否 active、TCP 443 是否监听、`/var/log/xray/access.log` 是否有用户入站；不要再按 hy2 端口排查。
+
 ## 1. 项目定位
 
 - **仓库**：Go + SQLite 后端，部署在 AWS Lightsail（东京 `ap-northeast-1`）

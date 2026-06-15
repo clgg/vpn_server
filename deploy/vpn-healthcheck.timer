@@ -1,5 +1,5 @@
 [Unit]
-Description=Run VPN sing-box health check every minute
+Description=Run VPN xray health check every minute
 
 [Timer]
 OnBootSec=2min

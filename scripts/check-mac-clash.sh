@@ -25,11 +25,11 @@ check() {
 }
 
 check "uuid" "da289730-2524-44f4-8d76-d6a7af321084"
-check "public-key" "SQZpcETHSkudvoGBuleYASszSLvJe9w7lpMR4U6ttGg"
+check "public-key" "CySRzCqeD6Kf1vhsR0n0ElvFGTuV_oinuwM44AXb6mk"
 check "server direct rule" "IP-CIDR,54.150.9.209/32,DIRECT"
 
-if grep -q "vQ0xo0vNT19i4paArjTyW9dzWnIZCLJre5amEKqRqgk" "${FILE}"; then
-  echo "BAD old public-key still present"
+if grep -q "owner-hy2" "${FILE}"; then
+  echo "BAD old hysteria2 node still present"
   fail=1
 fi
 

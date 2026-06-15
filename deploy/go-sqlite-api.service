@@ -17,7 +17,7 @@ Restart=always
 RestartSec=3
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=/var/lib/go-sqlite-api /etc/sing-box /var/lib/sing-box /usr/local/etc/xray /etc/hysteria /var/log/xray
+ReadWritePaths=/var/lib/go-sqlite-api /etc/sing-box /var/lib/sing-box /usr/local/etc/xray /var/log/xray
 
 [Install]
 WantedBy=multi-user.target

@@ -25,17 +25,6 @@ dns:
     '54.150.9.209': system
 
 proxies:
-  - name: owner-hy2
-    type: hysteria2
-    server: 54.150.9.209
-    port: 8443
-    password: "owner:YOUR_HY2_PASSWORD"
-    up: 100
-    down: 100
-    obfs: salamander
-    obfs-password: YOUR_HY2_OBFS_PASSWORD
-    sni: www.bing.com
-    skip-cert-verify: true
   - name: owner
     type: vless
     server: 54.150.9.209
@@ -55,13 +44,9 @@ proxies:
 
 proxy-groups:
   - name: PROXY
-    type: url-test
+    type: select
     proxies:
-      - owner-hy2
       - owner
-    url: https://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 100
 
 rules:
   - IP-CIDR,54.150.9.209/32,DIRECT,no-resolve

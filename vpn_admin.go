@@ -759,18 +759,12 @@ func (m vpnManager) apply(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	hy2Config, err := hysteria2ServerConfig(users)
-	if err != nil {
-		return err
-	}
 	xrayTarget := env("VPN_XRAY_CANDIDATE", "/var/lib/go-sqlite-api/xray-config.json")
-	hy2Target := env("VPN_HY2_CANDIDATE", "/var/lib/go-sqlite-api/hysteria2-config.yaml")
 	for _, item := range []struct {
 		path    string
 		content string
 	}{
 		{xrayTarget, xrayConfig},
-		{hy2Target, hy2Config},
 	} {
 		if err := os.MkdirAll(filepath.Dir(item.path), 0750); err != nil {
 			return err
@@ -779,17 +773,7 @@ func (m vpnManager) apply(ctx context.Context) error {
 			return err
 		}
 	}
-	for _, port := range hy2ExtraPorts() {
-		extraConfig, err := hysteria2ServerConfigForPort(port, hy2PortUsesObfs(port), users)
-		if err != nil {
-			return err
-		}
-		extraPath := filepath.Join(filepath.Dir(hy2Target), fmt.Sprintf("hysteria2-config-%d.yaml", port))
-		if err := os.WriteFile(extraPath, []byte(extraConfig), 0600); err != nil {
-			return err
-		}
-	}
-	// Keep sing-box JSON around for legacy tooling; server now runs xray + hysteria2.
+	// Keep sing-box JSON around for legacy tooling; server now runs xray.
 	if legacy, err := singBoxServerConfig(users); err == nil {
 		legacyTarget := env("VPN_SING_BOX_CANDIDATE", "/var/lib/go-sqlite-api/sing-box-config.json")
 		_ = os.WriteFile(legacyTarget, []byte(legacy), 0600)
@@ -1245,14 +1229,14 @@ dns:
   nameserver-policy:
 %s
 proxies:
-%s%s
+%s
 proxy-groups:
 %s
 
 rules:
 %s  - GEOIP,CN,DIRECT
   - MATCH,PROXY
-`, fakeIPFilterLine, dnsPolicyLine, clashVlessProxy(user, rt, "chrome", false), clashAllHy2Proxies(user, rt), clashProxyGroup(user), bypassRules)
+`, fakeIPFilterLine, dnsPolicyLine, clashVlessProxy(user, rt, "chrome", false), clashProxyGroup(user), bypassRules)
 }
 
 func clashAndroidConfig(user vpnUser, rt vpnRuntime) string {
@@ -1301,7 +1285,7 @@ dns:
   nameserver-policy:
 %s
 proxies:
-%s%s
+%s
 proxy-groups:
 %s
 
@@ -1311,7 +1295,7 @@ rules:
   - GEOIP,CN,DIRECT,no-resolve
   - GEOSITE,gfw,PROXY
   - MATCH,PROXY
-`, serverPolicyLine, clashVlessProxy(user, rt, "chrome", true), clashAllHy2Proxies(user, rt), clashProxyGroup(user), bypassRules, foreignRules)
+`, serverPolicyLine, clashVlessProxy(user, rt, "chrome", true), clashProxyGroup(user), bypassRules, foreignRules)
 }
 
 func singBoxChinaDirectDomains() []string {

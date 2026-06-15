@@ -1,5 +1,5 @@
 [Unit]
-Description=VPN sing-box health check
+Description=VPN xray health check
 
 [Service]
 Type=oneshot
